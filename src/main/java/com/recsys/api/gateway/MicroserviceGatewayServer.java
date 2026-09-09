@@ -282,7 +282,9 @@ public final class MicroserviceGatewayServer {
         server.blockUntilShutdown();
     }
 
-    static ClientFactory buildLlmClientFactory(EnvVars.EnvReader env) {
+    // Public so LlmProxyStreamConcurrencyTest (a different package) measures the factory
+    // production actually uses, not a hand-copied approximation of it.
+    public static ClientFactory buildLlmClientFactory(EnvVars.EnvReader env) {
         long connectMs = EnvVars.readLong(env, "LLM_CONNECT_TIMEOUT_MS", 2000L);
         long idleMs = EnvVars.readLong(env, "LLM_IDLE_TIMEOUT_MS", 60_000L);
         long pingMs = EnvVars.readLong(env, "LLM_PING_INTERVAL_MS", 20_000L);

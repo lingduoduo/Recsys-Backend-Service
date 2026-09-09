@@ -2,30 +2,24 @@ package com.recsys.application.gateway;
 
 import com.linecorp.armeria.client.WebClient;
 import com.linecorp.armeria.common.HttpData;
-import com.linecorp.armeria.common.HttpHeaderNames;
 import com.linecorp.armeria.common.HttpMethod;
 import com.linecorp.armeria.common.HttpObject;
 import com.linecorp.armeria.common.HttpRequest;
 import com.linecorp.armeria.common.HttpResponse;
-import com.linecorp.armeria.common.HttpResponseWriter;
-import com.linecorp.armeria.common.HttpStatus;
 import com.linecorp.armeria.common.MediaType;
 import com.linecorp.armeria.common.RequestHeaders;
-import com.linecorp.armeria.common.ResponseHeaders;
-import com.linecorp.armeria.server.ServerBuilder;
 import com.linecorp.armeria.testing.junit5.server.ServerExtension;
 import com.recsys.infrastructure.cache.LlmResponseCache;
 import com.recsys.ratelimit.LlmTokenRateLimiter;
 import com.recsys.resilience.RouteCircuitBreaker;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,71 +40,41 @@ class LlmSseKeepaliveTest {
     private static final long KEEPALIVE_MS = 100;   // scaled down from the 15 s default
     private static final long QUIET_GAP_MS = 700;   // several keepalive intervals
 
-    private static final ScheduledExecutorService SCHED =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "sse-keepalive-test");
-                t.setDaemon(true);
-                return t;
-            });
+    @RegisterExtension @Order(1)
+    static final ServerExtension upstream = LlmProxyTestServers.upstream(sb -> {
+        // Well-formed SSE that goes quiet mid-generation.
+        sb.service("/sse", (ctx, req) -> quietStream("text/event-stream",
+                "data: frame-0\n\n", "data: frame-1\n\n"));
+        // Native Ollama NDJSON — NOT SSE. A comment frame here would corrupt the stream.
+        // The first chunk ends on a *blank line* deliberately: that satisfies the
+        // frame-boundary guard, so the content-type guard is the only thing left standing.
+        // Ending it on a single "\n" would let the boundary check mask the bug instead.
+        sb.service("/ndjson", (ctx, req) -> quietStream("application/x-ndjson",
+                "{\"response\":\"a\",\"done\":false}\n\n", "{\"done\":true}\n"));
+        // An SSE frame split so the quiet gap lands *inside* it, with no frame terminator yet.
+        sb.service("/split", (ctx, req) -> quietStream("text/event-stream",
+                "data: {\"partial\":", "\"tail\"}\n\n"));
+    });
 
-    @RegisterExtension
-    static final ServerExtension upstream = new ServerExtension() {
-        @Override
-        protected void configure(ServerBuilder sb) {
-            sb.requestTimeoutMillis(0);
-            // Well-formed SSE that goes quiet mid-generation.
-            sb.service("/sse", (ctx, req) -> emit("text/event-stream",
-                    "data: frame-0\n\n", "data: frame-1\n\n"));
-            // Native Ollama NDJSON — NOT SSE. A comment frame here would corrupt the stream.
-            // The first chunk ends on a *blank line* deliberately: that satisfies the
-            // frame-boundary guard, so the content-type guard is the only thing left standing.
-            // Ending it on a single "\n" would let the boundary check mask the bug instead.
-            sb.service("/ndjson", (ctx, req) -> emit("application/x-ndjson",
-                    "{\"response\":\"a\",\"done\":false}\n\n", "{\"done\":true}\n"));
-            // An SSE frame split so the quiet gap lands *inside* it, with no frame terminator yet.
-            sb.service("/split", (ctx, req) -> emit("text/event-stream",
-                    "data: {\"partial\":", "\"tail\"}\n\n"));
-        }
-
-        private HttpResponse emit(String contentType, String first, String second) {
-            HttpResponseWriter w = HttpResponse.streaming();
-            w.write(ResponseHeaders.of(HttpStatus.OK, HttpHeaderNames.CONTENT_TYPE, contentType));
-            w.write(HttpData.ofUtf8(first));
-            SCHED.schedule(() -> {
-                w.write(HttpData.ofUtf8(second));
-                w.close();
-            }, QUIET_GAP_MS, TimeUnit.MILLISECONDS);
-            return w;
-        }
-    };
-
-    static ServerExtension gw;
-
-    private static synchronized ServerExtension gw() {
-        if (gw == null) {
-            gw = new ServerExtension() {
-                @Override
-                protected void configure(ServerBuilder sb) {
-                    MicroserviceRoute route = new MicroserviceRoute(
-                            "llm", "/api/llm", "LLM_SERVICE_URL",
-                            URI.create(upstream.httpUri().toString()), "/health", null);
-                    sb.serviceUnder("/api/llm", new LlmProxyService(
-                            route, Duration.ofSeconds(60), new RouteCircuitBreaker(),
-                            LlmTokenRateLimiter.disabled(), LlmResponseCache.disabled(),
-                            1_000, 1_000L, null, null, KEEPALIVE_MS));
-                }
-            };
-            gw.start();
-        }
-        return gw;
+    /** The first chunk at once, the second after a quiet gap several keepalive intervals long. */
+    private static HttpResponse quietStream(String contentType, String first, String second) {
+        return LlmProxyTestServers.slowStream(contentType, 0, QUIET_GAP_MS, List.of(first, second));
     }
+
+    // @Order(2): the gateway reads upstream's URI when it starts, so upstream must start first.
+    @RegisterExtension @Order(2)
+    static final ServerExtension gw = LlmProxyTestServers.gateway(upstream::httpUri,
+            route -> new LlmProxyService(
+                    route, Duration.ofSeconds(60), new RouteCircuitBreaker(),
+                    LlmTokenRateLimiter.disabled(), LlmResponseCache.disabled(),
+                    1_000, 1_000L, null, null, KEEPALIVE_MS));
 
     /** The exact bytes the client received, in order. */
     private static String streamBody(String path) throws Exception {
         StringBuilder body = new StringBuilder();
         ConcurrentLinkedQueue<String> chunks = new ConcurrentLinkedQueue<>();
         CompletableFuture<String> terminal = new CompletableFuture<>();
-        WebClient.builder(gw().httpUri()).responseTimeoutMillis(0).build()
+        WebClient.builder(gw.httpUri()).responseTimeoutMillis(0).build()
                 .execute(HttpRequest.of(
                         RequestHeaders.builder(HttpMethod.POST, path)
                                 .contentType(MediaType.JSON_UTF_8).build(),

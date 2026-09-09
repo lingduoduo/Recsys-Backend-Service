@@ -4,17 +4,12 @@ import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.WebClient;
 import com.linecorp.armeria.common.CommonPools;
 import com.linecorp.armeria.common.HttpData;
-import com.linecorp.armeria.common.HttpHeaderNames;
 import com.linecorp.armeria.common.HttpMethod;
 import com.linecorp.armeria.common.HttpRequest;
-import com.linecorp.armeria.common.HttpResponse;
-import com.linecorp.armeria.common.HttpResponseWriter;
 import com.linecorp.armeria.common.HttpStatus;
 import com.linecorp.armeria.common.MediaType;
 import com.linecorp.armeria.common.RequestHeaders;
-import com.linecorp.armeria.common.ResponseHeaders;
 import com.linecorp.armeria.common.SessionProtocol;
-import com.linecorp.armeria.server.ServerBuilder;
 import com.linecorp.armeria.testing.junit5.server.ServerExtension;
 import com.recsys.api.gateway.MicroserviceGatewayServer;
 import com.recsys.infrastructure.cache.LlmResponseCache;
@@ -26,18 +21,14 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -88,67 +79,32 @@ class LlmProxyStreamConcurrencyTest {
     private static final int MAX_THREAD_GROWTH = N / 2;
     /** Full serialization would take N × FRAMES × FRAME_GAP_MS = 100 s. */
     private static final long MAX_WALL_MS = 10_000;
-    private static final String EXPECTED_BODY = IntStream.range(0, FRAMES)
+    private static final List<String> SSE_FRAMES = IntStream.range(0, FRAMES)
             .mapToObj(n -> "data: frame-" + n + "\n\n")
-            .collect(Collectors.joining());
+            .toList();
+    private static final String EXPECTED_BODY = String.join("", SSE_FRAMES);
     private static final String GATEWAY_PACKAGE = LlmProxyService.class.getPackageName() + ".";
-
-    private static final ScheduledExecutorService SCHED =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "stream-concurrency-upstream");
-                t.setDaemon(true);
-                return t;
-            });
+    private static final String TEST_SERVERS = LlmProxyTestServers.class.getName();
 
     @RegisterExtension @Order(1)
-    static final ServerExtension upstream = new ServerExtension() {
-        @Override
-        protected void configure(ServerBuilder sb) {
-            sb.requestTimeoutMillis(0);
-            sb.service("/sse", (ctx, req) -> {
-                HttpResponseWriter w = HttpResponse.streaming();
-                w.write(ResponseHeaders.of(HttpStatus.OK,
-                        HttpHeaderNames.CONTENT_TYPE, "text/event-stream"));
-                emit(w, 0);
-                return w;
-            });
-        }
-    };
-
-    /**
-     * One frame now, the next after a gap; self-terminating, so nothing outlives the stream.
-     * {@code tryWrite} rather than {@code write}: a client that went away has aborted the
-     * writer, and the chain should end there instead of throwing into the scheduler.
-     */
-    private static void emit(HttpResponseWriter w, int n) {
-        if (n == FRAMES) {
-            w.close();
-            return;
-        }
-        if (!w.tryWrite(HttpData.ofUtf8("data: frame-" + n + "\n\n"))) return;
-        SCHED.schedule(() -> emit(w, n + 1), FRAME_GAP_MS, TimeUnit.MILLISECONDS);
-    }
+    static final ServerExtension upstream = LlmProxyTestServers.upstream(sb ->
+            sb.service("/sse", (ctx, req) -> LlmProxyTestServers.slowStream(
+                    "text/event-stream", 0, FRAME_GAP_MS, SSE_FRAMES)));
 
     /** The factory production uses, at its defaults — not a hand-copied approximation. */
     private static final ClientFactory LLM_CLIENT_FACTORY =
             MicroserviceGatewayServer.buildLlmClientFactory(k -> null);
 
-    // @Order(2): configure() reads upstream.uri(), so upstream must already be started.
+    // @Order(2): the gateway reads upstream's URI when it starts, so upstream must start first.
+    // HTTP/1.1 upstream leg: the production shape (see class Javadoc). Keepalive disabled
+    // (last arg 0) so the body is exactly the upstream frames.
     @RegisterExtension @Order(2)
-    static final ServerExtension gw = new ServerExtension() {
-        @Override
-        protected void configure(ServerBuilder sb) {
-            // HTTP/1.1 upstream leg: the production shape (see class Javadoc).
-            MicroserviceRoute route = new MicroserviceRoute(
-                    "llm", "/api/llm", "LLM_SERVICE_URL",
-                    upstream.uri(SessionProtocol.H1C), "/health", null);
-            // Keepalive disabled (last arg 0) so the body is exactly the upstream frames.
-            sb.serviceUnder("/api/llm", new LlmProxyService(
+    static final ServerExtension gw = LlmProxyTestServers.gateway(
+            () -> upstream.uri(SessionProtocol.H1C),
+            route -> new LlmProxyService(
                     route, Duration.ofSeconds(60), new RouteCircuitBreaker(),
                     LlmTokenRateLimiter.disabled(), LlmResponseCache.disabled(),
                     1_000, 1_000L, null, LLM_CLIENT_FACTORY, 0L));
-        }
-    };
 
     @AfterAll
     static void closeClientFactory() {
@@ -275,14 +231,15 @@ class LlmProxyStreamConcurrencyTest {
     }
 
     /**
-     * Gateway-package production code only. Sibling test classes share the package and the
-     * Surefire fork (this class's own sampling thread and upstream emitter among them), and a
-     * leftover task from one of them must not read as "the proxy is on a foreign thread".
+     * Gateway-package production code only. Sibling test classes and the shared
+     * {@link LlmProxyTestServers} fixtures live in the same package and the same Surefire fork
+     * (this class's sampling thread and the upstream emitter among them), and a task of theirs
+     * must not read as "the proxy is on a foreign thread".
      */
     private static boolean isProductionGatewayClass(String className) {
         if (!className.startsWith(GATEWAY_PACKAGE)) return false;
         int nested = className.indexOf('$');
         String topLevel = nested < 0 ? className : className.substring(0, nested);
-        return !topLevel.endsWith("Test");
+        return !topLevel.endsWith("Test") && !topLevel.equals(TEST_SERVERS);
     }
 }

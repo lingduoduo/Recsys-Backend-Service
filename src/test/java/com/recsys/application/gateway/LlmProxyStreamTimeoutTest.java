@@ -3,17 +3,13 @@ package com.recsys.application.gateway;
 import com.linecorp.armeria.client.WebClient;
 import com.linecorp.armeria.common.AggregatedHttpResponse;
 import com.linecorp.armeria.common.HttpData;
-import com.linecorp.armeria.common.HttpHeaderNames;
 import com.linecorp.armeria.common.HttpMethod;
 import com.linecorp.armeria.common.HttpObject;
 import com.linecorp.armeria.common.HttpRequest;
 import com.linecorp.armeria.common.HttpResponse;
-import com.linecorp.armeria.common.HttpResponseWriter;
 import com.linecorp.armeria.common.HttpStatus;
 import com.linecorp.armeria.common.MediaType;
 import com.linecorp.armeria.common.RequestHeaders;
-import com.linecorp.armeria.common.ResponseHeaders;
-import com.linecorp.armeria.server.ServerBuilder;
 import com.linecorp.armeria.testing.junit5.server.ServerExtension;
 import com.recsys.infrastructure.cache.LlmResponseCache;
 import com.recsys.ratelimit.LlmTokenRateLimiter;
@@ -21,15 +17,12 @@ import com.recsys.resilience.RouteCircuitBreaker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,65 +47,38 @@ class LlmProxyStreamTimeoutTest {
     private static final long SERVER_TIMEOUT_MS = 300; // fires well before the stream ends
     private static final String BUFFERED_REPLY = "{\"choices\":[{\"text\":\"done\"}]}";
 
-    private static final ScheduledExecutorService SCHEDULER =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "sse-test-emitter");
-                t.setDaemon(true);
-                return t;
-            });
+    private static final List<String> SSE_FRAMES = IntStream.range(0, FRAMES)
+            .mapToObj(i -> "data: frame-" + i + "\n\n")
+            .toList();
 
-    /** Emits {@link #FRAMES} SSE frames {@link #FRAME_GAP_MS} apart, like a slow token stream. */
+    /**
+     * Emits {@link #FRAMES} SSE frames {@link #FRAME_GAP_MS} apart, like a slow token stream.
+     * The upstream must never be the side that cuts the stream off — the helper sets its
+     * request timeout to 0.
+     */
     @RegisterExtension
-    static final ServerExtension slowSseUpstream = new ServerExtension() {
-        @Override
-        protected void configure(ServerBuilder sb) {
-            // The upstream must never be the side that cuts the stream off.
-            sb.requestTimeoutMillis(0);
-            // A slow *buffered* LLM reply: one whole response, well after the server timeout.
-            sb.service("/slow", (ctx, req) -> {
-                CompletableFuture<HttpResponse> reply = new CompletableFuture<>();
-                SCHEDULER.schedule(
-                        () -> reply.complete(HttpResponse.of(
-                                HttpStatus.OK, MediaType.JSON_UTF_8, BUFFERED_REPLY)),
-                        FRAMES * FRAME_GAP_MS, TimeUnit.MILLISECONDS);
-                return HttpResponse.of(reply);
-            });
-            sb.service("prefix:/", (ctx, req) -> {
-                HttpResponseWriter writer = HttpResponse.streaming();
-                writer.write(ResponseHeaders.of(HttpStatus.OK,
-                        HttpHeaderNames.CONTENT_TYPE, "text/event-stream"));
-                AtomicInteger emitted = new AtomicInteger();
-                Runnable[] emitNext = new Runnable[1];
-                emitNext[0] = () -> {
-                    int i = emitted.getAndIncrement();
-                    if (i >= FRAMES) {
-                        writer.close();
-                        return;
-                    }
-                    writer.write(HttpData.ofUtf8("data: frame-" + i + "\n\n"));
-                    SCHEDULER.schedule(emitNext[0], FRAME_GAP_MS, TimeUnit.MILLISECONDS);
-                };
-                SCHEDULER.schedule(emitNext[0], FRAME_GAP_MS, TimeUnit.MILLISECONDS);
-                return writer;
-            });
-        }
-    };
+    static final ServerExtension slowSseUpstream = LlmProxyTestServers.upstream(sb -> {
+        // A slow *buffered* LLM reply: one whole response, well after the server timeout.
+        sb.service("/slow", (ctx, req) -> {
+            CompletableFuture<HttpResponse> reply = new CompletableFuture<>();
+            LlmProxyTestServers.SLOW_UPSTREAM.schedule(
+                    () -> reply.complete(HttpResponse.of(
+                            HttpStatus.OK, MediaType.JSON_UTF_8, BUFFERED_REPLY)),
+                    FRAMES * FRAME_GAP_MS, TimeUnit.MILLISECONDS);
+            return HttpResponse.of(reply);
+        });
+        sb.service("prefix:/", (ctx, req) -> LlmProxyTestServers.slowStream(
+                "text/event-stream", FRAME_GAP_MS, FRAME_GAP_MS, SSE_FRAMES));
+    });
 
     /** Mirrors the production gateway: a server request timeout the LLM route must escape. */
     private static ServerExtension gateway() {
-        return new ServerExtension() {
-            @Override
-            protected void configure(ServerBuilder sb) {
-                sb.requestTimeoutMillis(SERVER_TIMEOUT_MS);
-                MicroserviceRoute route = new MicroserviceRoute(
-                        "llm", "/api/llm", "LLM_SERVICE_URL",
-                        URI.create(slowSseUpstream.httpUri().toString()), "/health", null);
-                sb.serviceUnder("/api/llm", new LlmProxyService(
+        return LlmProxyTestServers.gateway(slowSseUpstream::httpUri,
+                sb -> sb.requestTimeoutMillis(SERVER_TIMEOUT_MS),
+                route -> new LlmProxyService(
                         route, Duration.ofSeconds(60), new RouteCircuitBreaker(),
                         LlmTokenRateLimiter.disabled(), LlmResponseCache.disabled(),
                         1_000, 1_000L));
-            }
-        };
     }
 
     private record StreamOutcome(List<String> frames, String terminalSignal) {}

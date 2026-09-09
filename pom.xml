@@ -556,6 +556,11 @@
                 <include>**/gateway/LlmTokenBudgetReconciliationTest.java</include>
                 <include>**/gateway/LlmTokenUsageScannerTest.java</include>
                 <include>**/gateway/LlmSseKeepaliveTest.java</include>
+                <!-- The LLM proxy's concurrency ceiling is outstanding subscriptions, not a
+                     thread pool: 200 concurrent SSE streams must complete with no non-event-loop
+                     thread inside the proxy and bounded JVM thread growth. Proven red against a
+                     blocking-executor mutation. -->
+                <include>**/gateway/LlmProxyStreamConcurrencyTest.java</include>
                 <include>**/auth/AdminTokenGuardTest.java</include>
                 <include>**/serving/EmbeddingSeedRepairTest.java</include>
                 <include>**/serving/CacheKeyParamTest.java</include>

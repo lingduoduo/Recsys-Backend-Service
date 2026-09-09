@@ -141,6 +141,50 @@ artifact. No new numbered document, no README change (`DocumentationIndexTest` i
   and does not affect liveness: Armeria never idles a connection with an in-flight
   response (sharp edge 4).
 
+## Revision after review (2026-09-09)
+
+The first committed version of the test differed from what shipped. A mutation check and a
+multi-angle code review changed the design as follows; the sections above describe the
+original intent and are kept for the record.
+
+- **Primary signal is "held", not "seen".** The growth-only test caught the mutation in one
+  method but not the other: the ~200 blocking-executor threads the first method spawned
+  outlived it and became the second method's baseline. The primary signal is now a stack
+  sample every 50 ms: a thread other than a common event loop counts only if it is inside
+  gateway production code in two *consecutive* samples. A thread-per-stream regression parks
+  a thread for the whole stream; a conforming short hop to a bounded pool is never seen twice
+  in a row, so the signal cannot flake in either direction. Measured under the mutation: 190
+  (h2c) and 200 (h1c) held threads.
+- **Event loops are classified by identity** against `CommonPools.workerGroup()`, which both
+  the gateway server and the production LLM client factory use, not by thread-name prefix.
+- **Growth counts non-event-loop threads only and is bounded by N/2**, derived from the
+  invariant rather than tuned to one laptop. Netty starts common workers lazily, 2×CPUs of
+  them, so a JVM-wide bound of 32 would fail conforming h1c runs on a many-core host.
+- **Gateway→upstream leg is HTTP/1.1**, the production shape. Ollama 0.21.2 was started
+  locally and probed: an h2c prior-knowledge connect is refused and an upgrade attempt stays
+  on HTTP/1.1. The test's route targets the upstream's h1c URI, so the gateway opens one
+  upstream connection per stream, as it does against Ollama.
+- **The test uses the production client factory.** `MicroserviceGatewayServer.buildLlmClientFactory`
+  is made `public` (it was package-private) and called with no environment overrides, so a
+  knob added to the production factory is exercised here rather than silently missed. This
+  is the one production-code change in the PR; it changes no behaviour.
+- **Bodies are aggregated and compared exactly** to the expected frame sequence, replacing a
+  per-chunk `\n\n` counter that would have miscounted a terminator split across two chunks,
+  and pinning frame order, which the counter never did.
+- **Fixtures are torn down.** The upstream emitter is a self-terminating one-shot chain
+  (the fixed-rate task was never cancelled and would have ticked for the rest of the shared
+  Surefire fork); the gateway is a `@RegisterExtension @Order(2)` extension JUnit stops,
+  following `RecommendationGatewayServiceTest`'s precedent, instead of a lazily started
+  singleton; the client factory is closed in `@AfterAll`.
+- **N = 200 is deliberate**: it equals Armeria's common blocking executor size, so a
+  thread-per-stream regression also manifests as the production cap.
+
+Declined from the review, as follow-ups outside this PR: a shared test helper for the four
+gateway tests that each build a `ServerExtension` around `LlmProxyService`; giving
+`LlmSseKeepaliveTest` the same `@Order` treatment; a parameterized test in place of two named
+methods. Not pinnable by this test and stated as non-goals in its Javadoc: blocking *on* an
+event loop, and virtual threads.
+
 ## Success criteria
 
 - `mvn test -Dtest=LlmProxyStreamConcurrencyTest` passes on main plus this change.

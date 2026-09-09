@@ -170,14 +170,24 @@ production shape — a burst of new HTTP/1.1 connections from the ALB to one
 pod — is unmeasured.
 
 `LlmProxyStreamConcurrencyTest` pins the property: 200 concurrent streams must
-complete with every frame, a mid-burst stack sample must find no thread other
-than an Armeria event loop inside `LlmProxyService`, and the JVM may grow by at
-most 32 threads. It was proven red against a mutation that runs
-`forwardStreaming` on the blocking executor (198 and 176 foreign threads
-sampled). The stack sample is the primary signal because thread growth alone is
-order-dependent: the pool threads a regression spawns in the first test method
-outlive it and become the second method's baseline, which is exactly how the
-first version of the test missed the mutation in one of its two methods.
+complete with every frame in order, no thread other than a common event loop may
+be *held* inside gateway code (seen there in two consecutive 50 ms stack
+samples), and the non-event-loop thread count may grow by at most N/2. It was
+proven red against a mutation that runs `forwardStreaming` on the blocking
+executor (190 and 200 held threads). "Held" rather than "seen" is what makes the
+signal safe: a regression parks a thread for the whole stream, while a conforming
+short hop to a bounded pool is never sampled twice in a row. Growth is kept as the
+human-readable number but is order-dependent on its own: the pool threads a
+regression spawns in the first test method outlive it and become the second
+method's baseline, which is exactly how the first, growth-only version of the
+test missed the mutation in one of its two methods.
+
+The test's gateway→upstream leg is HTTP/1.1, because that is the production
+shape and not the h2c the probe table above shows: Ollama serves HTTP/1.1 only
+(measured on 0.21.2 — an h2c prior-knowledge connect is refused, an upgrade
+attempt stays on 1.1), so `LLM_PING_INTERVAL_MS`'s HTTP/2 PING never applies to
+the deployed upstream and the gateway opens one upstream connection per
+concurrent stream.
 
 Armeria's `ClientFactoryBuilder` does expose the knobs that would tune upstream
 fan-out if it were ever needed — `maxNumEventLoopsPerEndpoint`,

@@ -2,10 +2,10 @@ package com.recsys.application.gateway;
 
 import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.WebClient;
+import com.linecorp.armeria.common.CommonPools;
 import com.linecorp.armeria.common.HttpData;
 import com.linecorp.armeria.common.HttpHeaderNames;
 import com.linecorp.armeria.common.HttpMethod;
-import com.linecorp.armeria.common.HttpObject;
 import com.linecorp.armeria.common.HttpRequest;
 import com.linecorp.armeria.common.HttpResponse;
 import com.linecorp.armeria.common.HttpResponseWriter;
@@ -16,24 +16,29 @@ import com.linecorp.armeria.common.ResponseHeaders;
 import com.linecorp.armeria.common.SessionProtocol;
 import com.linecorp.armeria.server.ServerBuilder;
 import com.linecorp.armeria.testing.junit5.server.ServerExtension;
+import com.recsys.api.gateway.MicroserviceGatewayServer;
 import com.recsys.infrastructure.cache.LlmResponseCache;
 import com.recsys.ratelimit.LlmTokenRateLimiter;
 import com.recsys.resilience.RouteCircuitBreaker;
+import io.netty.util.concurrent.EventExecutor;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.ThreadMXBean;
 import java.net.URI;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -45,29 +50,48 @@ import static org.assertj.core.api.Assertions.assertThat;
  * pinned here so a future change that wraps {@code forwardStreaming} in a blocking task
  * fails loudly instead of quietly capping the proxy at the blocking executor's size.
  *
- * <p>Two signals, neither timing-based. The primary one is a mid-burst stack sample: no
- * thread other than an Armeria event loop may be inside {@code LlmProxyService} while streams
- * are in flight. It is order-independent, which matters — the secondary signal, JVM thread
- * growth during the burst, is not: a blocking-executor regression grows the JVM by ~N threads
- * on the first test method to run, but those pool threads outlive that method and become the
- * baseline of the next one, whose growth check then passes. Both are kept; the growth number
- * is the one a human reads. The wall-time ceiling is deliberately loose — it exists only to
- * catch full serialization (N × stream duration), not to measure latency.
+ * <p>Two signals, neither timing-based, both taken from periodic stack samples while the
+ * burst is in flight, and both ignoring Armeria's common event loops (classified by identity
+ * against {@link CommonPools#workerGroup()}, which both the gateway server and the production
+ * LLM client factory use — not by thread name). The primary signal: no other thread may be
+ * <em>held</em> inside gateway production code, where held means seen there in two
+ * consecutive samples. A thread-per-stream regression parks a thread for the whole ≥500 ms
+ * life of each stream; a conforming short hop to a bounded pool lasts microseconds and is
+ * never seen twice in a row, so this cannot flake in either direction. The secondary signal:
+ * the number of non-event-loop threads may not grow by more than N/2 during the burst. The
+ * primary is order-independent; the secondary is not — a regression grows the pool by ~N on
+ * the first test method to run, but those threads outlive it and become the next method's
+ * baseline. Both are kept; the growth number is the one a human reads. The wall-time ceiling
+ * is deliberately loose — it exists only to catch full serialization (N × stream duration).
  *
  * <p>Both an h2c and an h1c client leg are exercised because they hit different
  * server-side connection handling: one multiplexed connection versus one connection per
- * stream. The gateway→upstream leg is whatever Armeria negotiates (h2c here, as in
- * production against an Armeria peer).
+ * stream. The gateway→upstream leg is HTTP/1.1 in both, because that is the production
+ * shape: Ollama (Go {@code net/http}) serves HTTP/1.1 only — measured 2026-09-09 on 0.21.2,
+ * where an h2c prior-knowledge connect is refused and an upgrade attempt stays on 1.1 — so
+ * the gateway opens one upstream connection per concurrent stream. N equals Armeria's
+ * common blocking executor size (200) on purpose: a thread-per-stream regression then also
+ * shows up as the production cap, every pool thread parked at once.
+ *
+ * <p>Not pinned here, deliberately: blocking <em>on</em> an event loop (a synchronous call
+ * inside the subscriber stalls the worker that carries streams, but holds no extra thread),
+ * and virtual threads (invisible to {@code Thread.getAllStackTraces()}; unreachable on the
+ * JDK 17 build, but a JDK bump would make this test vacuous for them, not red).
  */
 class LlmProxyStreamConcurrencyTest {
 
     private static final int N = 200;
     private static final int FRAMES = 5;
     private static final long FRAME_GAP_MS = 100;
-    /** Measured growth was 7 (h2c) and 12 (h1c); a thread-per-stream regression is ~N. */
-    private static final int MAX_THREAD_GROWTH = 32;
+    private static final long SAMPLE_INTERVAL_MS = 50;
+    /** Non-event-loop thread growth: ~0 on conforming code, ~N under a regression. */
+    private static final int MAX_THREAD_GROWTH = N / 2;
     /** Full serialization would take N × FRAMES × FRAME_GAP_MS = 100 s. */
     private static final long MAX_WALL_MS = 10_000;
+    private static final String EXPECTED_BODY = IntStream.range(0, FRAMES)
+            .mapToObj(n -> "data: frame-" + n + "\n\n")
+            .collect(Collectors.joining());
+    private static final String GATEWAY_PACKAGE = LlmProxyService.class.getPackageName() + ".";
 
     private static final ScheduledExecutorService SCHED =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -76,7 +100,7 @@ class LlmProxyStreamConcurrencyTest {
                 return t;
             });
 
-    @RegisterExtension
+    @RegisterExtension @Order(1)
     static final ServerExtension upstream = new ServerExtension() {
         @Override
         protected void configure(ServerBuilder sb) {
@@ -85,50 +109,50 @@ class LlmProxyStreamConcurrencyTest {
                 HttpResponseWriter w = HttpResponse.streaming();
                 w.write(ResponseHeaders.of(HttpStatus.OK,
                         HttpHeaderNames.CONTENT_TYPE, "text/event-stream"));
-                AtomicInteger i = new AtomicInteger();
-                SCHED.scheduleAtFixedRate(() -> {
-                    int n = i.getAndIncrement();
-                    if (n < FRAMES) {
-                        w.write(HttpData.ofUtf8("data: frame-" + n + "\n\n"));
-                    } else if (n == FRAMES) {
-                        w.close();
-                    }
-                }, 0, FRAME_GAP_MS, TimeUnit.MILLISECONDS);
+                emit(w, 0);
                 return w;
             });
         }
     };
 
-    // Built the way MicroserviceGatewayServer.buildLlmClientFactory builds the production one.
-    private static final ClientFactory LLM_CLIENT_FACTORY = ClientFactory.builder()
-            .connectTimeout(Duration.ofMillis(2_000))
-            .idleTimeout(Duration.ofMillis(60_000))
-            .pingIntervalMillis(20_000)
-            .build();
-
-    // Started lazily: JUnit does not guarantee static @RegisterExtension field order, and a
-    // gateway extension that reads upstream.httpUri() during configure() fails with
-    // "server did not start" whenever it happens to run first.
-    private static ServerExtension gw;
-
-    private static synchronized ServerExtension gw() {
-        if (gw == null) {
-            gw = new ServerExtension() {
-                @Override
-                protected void configure(ServerBuilder sb) {
-                    MicroserviceRoute route = new MicroserviceRoute(
-                            "llm", "/api/llm", "LLM_SERVICE_URL",
-                            URI.create(upstream.httpUri().toString()), "/health", null);
-                    // Keepalive disabled (last arg 0) so the frame count is exact.
-                    sb.serviceUnder("/api/llm", new LlmProxyService(
-                            route, Duration.ofSeconds(60), new RouteCircuitBreaker(),
-                            LlmTokenRateLimiter.disabled(), LlmResponseCache.disabled(),
-                            1_000, 1_000L, null, LLM_CLIENT_FACTORY, 0L));
-                }
-            };
-            gw.start();
+    /**
+     * One frame now, the next after a gap; self-terminating, so nothing outlives the stream.
+     * {@code tryWrite} rather than {@code write}: a client that went away has aborted the
+     * writer, and the chain should end there instead of throwing into the scheduler.
+     */
+    private static void emit(HttpResponseWriter w, int n) {
+        if (n == FRAMES) {
+            w.close();
+            return;
         }
-        return gw;
+        if (!w.tryWrite(HttpData.ofUtf8("data: frame-" + n + "\n\n"))) return;
+        SCHED.schedule(() -> emit(w, n + 1), FRAME_GAP_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** The factory production uses, at its defaults — not a hand-copied approximation. */
+    private static final ClientFactory LLM_CLIENT_FACTORY =
+            MicroserviceGatewayServer.buildLlmClientFactory(k -> null);
+
+    // @Order(2): configure() reads upstream.uri(), so upstream must already be started.
+    @RegisterExtension @Order(2)
+    static final ServerExtension gw = new ServerExtension() {
+        @Override
+        protected void configure(ServerBuilder sb) {
+            // HTTP/1.1 upstream leg: the production shape (see class Javadoc).
+            MicroserviceRoute route = new MicroserviceRoute(
+                    "llm", "/api/llm", "LLM_SERVICE_URL",
+                    upstream.uri(SessionProtocol.H1C), "/health", null);
+            // Keepalive disabled (last arg 0) so the body is exactly the upstream frames.
+            sb.serviceUnder("/api/llm", new LlmProxyService(
+                    route, Duration.ofSeconds(60), new RouteCircuitBreaker(),
+                    LlmTokenRateLimiter.disabled(), LlmResponseCache.disabled(),
+                    1_000, 1_000L, null, LLM_CLIENT_FACTORY, 0L));
+        }
+    };
+
+    @AfterAll
+    static void closeClientFactory() {
+        LLM_CLIENT_FACTORY.close();
     }
 
     @Test
@@ -142,83 +166,70 @@ class LlmProxyStreamConcurrencyTest {
     }
 
     private static void assertNoThreadPerStream(SessionProtocol clientLeg) throws Exception {
-        ThreadMXBean threads = ManagementFactory.getThreadMXBean();
-        WebClient client = WebClient.builder(gw().uri(clientLeg))
+        WebClient client = WebClient.builder(gw.uri(clientLeg))
                 .responseTimeoutMillis(0)
                 .build();
 
-        threads.resetPeakThreadCount();
-        int before = threads.getThreadCount();
-        AtomicInteger frames = new AtomicInteger();
-        List<CompletableFuture<String>> outcomes = new ArrayList<>(N);
+        int threadsBefore = sample().nonEventLoopThreads();
+        CountDownLatch done = new CountDownLatch(N);
+        Queue<String> bodies = new ConcurrentLinkedQueue<>();
+        Queue<String> errors = new ConcurrentLinkedQueue<>();
         long start = System.nanoTime();
 
         for (int k = 0; k < N; k++) {
-            CompletableFuture<String> outcome = new CompletableFuture<>();
-            outcomes.add(outcome);
             client.execute(HttpRequest.of(
                             RequestHeaders.builder(HttpMethod.POST, "/api/llm/sse")
                                     .contentType(MediaType.JSON_UTF_8).build(),
                             HttpData.ofUtf8("{\"stream\":true,\"max_tokens\":10}")))
-                    .subscribe(new org.reactivestreams.Subscriber<HttpObject>() {
-                        @Override
-                        public void onSubscribe(org.reactivestreams.Subscription s) {
-                            s.request(Long.MAX_VALUE);
+                    .aggregate()
+                    .whenComplete((res, t) -> {
+                        if (t != null) {
+                            errors.add(String.valueOf(t));
+                        } else if (res.status() != HttpStatus.OK) {
+                            errors.add("status " + res.status());
+                        } else {
+                            bodies.add(res.contentUtf8());
                         }
-
-                        @Override
-                        public void onNext(HttpObject o) {
-                            if (o instanceof HttpData d && !d.isEmpty()) {
-                                frames.addAndGet(countFrames(d.toStringUtf8()));
-                            }
-                        }
-
-                        @Override
-                        public void onError(Throwable t) {
-                            outcome.complete("error: " + t);
-                        }
-
-                        @Override
-                        public void onComplete() {
-                            outcome.complete("ok");
-                        }
+                        done.countDown();
                     });
         }
 
-        // Sample while the burst is in flight: which threads are inside LlmProxyService right now?
-        CompletableFuture<Void> all = CompletableFuture.allOf(outcomes.toArray(new CompletableFuture[0]));
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(MAX_WALL_MS * 2);
-        int maxForeignThreadsInsideProxy = 0;
-        while (!all.isDone() && System.nanoTime() < deadline) {
-            maxForeignThreadsInsideProxy = Math.max(
-                    maxForeignThreadsInsideProxy, nonEventLoopThreadsInsideProxy());
-            Thread.sleep(25);
+        // Sample while the burst is in flight. One deadline (MAX_WALL_MS), and every assertion
+        // below still runs if it is hit, so a hang reports the sampled counts, not a bare timeout.
+        int maxHeldInsideGateway = 0;
+        int maxThreads = threadsBefore;
+        Set<Thread> insidePreviously = Set.of();
+        while (done.getCount() > 0 && elapsedMs(start) < MAX_WALL_MS) {
+            Sample s = sample();
+            Set<Thread> held = new HashSet<>(s.insideGateway());
+            held.retainAll(insidePreviously);
+            maxHeldInsideGateway = Math.max(maxHeldInsideGateway, held.size());
+            maxThreads = Math.max(maxThreads, s.nonEventLoopThreads());
+            insidePreviously = s.insideGateway();
+            Thread.sleep(SAMPLE_INTERVAL_MS);
         }
-        all.get(1, TimeUnit.SECONDS);
-        long wallMs = (System.nanoTime() - start) / 1_000_000;
-        int growth = threads.getPeakThreadCount() - before;
+        long wallMs = elapsedMs(start);
+        int growth = maxThreads - threadsBefore;
 
-        List<String> failures = outcomes.stream()
-                .map(CompletableFuture::join)
-                .filter(s -> !"ok".equals(s))
-                .distinct()
-                .limit(3)
-                .toList();
-
-        assertThat(failures)
-                .as("[%s] every one of %d concurrent streams completes", clientLeg, N)
+        assertThat(errors.stream().distinct().limit(3).toList())
+                .as("[%s] no stream failed", clientLeg)
                 .isEmpty();
-        assertThat(frames.get())
-                .as("[%s] every frame of every stream is delivered", clientLeg)
-                .isEqualTo(N * FRAMES);
-        assertThat(maxForeignThreadsInsideProxy)
-                .as("[%s] threads other than Armeria event loops found inside LlmProxyService "
-                        + "while %d streams were in flight — the proxy must run only on event "
-                        + "loops", clientLeg, N)
+        assertThat(done.getCount())
+                .as("[%s] streams still open after %d ms", clientLeg, wallMs)
+                .isZero();
+        assertThat(bodies)
+                .as("[%s] every stream delivered every frame, in order", clientLeg)
+                .hasSize(N)
+                .containsOnly(EXPECTED_BODY);
+        assertThat(maxHeldInsideGateway)
+                .as("[%s] threads other than Armeria event loops held inside gateway code "
+                        + "across consecutive %d ms samples while %d streams were in flight — "
+                        + "the proxy must hold no thread per stream", clientLeg,
+                        SAMPLE_INTERVAL_MS, N)
                 .isZero();
         assertThat(growth)
-                .as("[%s] JVM thread growth while %d streams were in flight — a thread held "
-                        + "per stream would grow this by ~%d", clientLeg, N, N)
+                .as("[%s] growth in non-event-loop threads while %d streams were in flight — a "
+                        + "thread held per stream would grow this by ~%d", clientLeg, N, N)
                 .isLessThanOrEqualTo(MAX_THREAD_GROWTH);
         assertThat(wallMs)
                 .as("[%s] streams ran concurrently, not serially (serial would be ~%d ms)",
@@ -226,35 +237,52 @@ class LlmProxyStreamConcurrencyTest {
                 .isLessThan(MAX_WALL_MS);
     }
 
+    private static long elapsedMs(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
+    }
+
     /**
-     * Threads other than Armeria's event loops that are executing {@code LlmProxyService} code
-     * at this instant. On conforming code this is always 0: every proxy frame runs on an
-     * {@code armeria-common-worker-*} thread. A blocking-executor regression parks ~N
-     * {@code armeria-common-blocking-tasks-*} threads inside the proxy for the life of each
-     * stream, so a 25 ms sampling loop cannot miss it.
+     * One stack sample over every thread that is not a common event loop:
+     * {@code nonEventLoopThreads} is how many there are, {@code insideGateway} which of them
+     * are executing {@code com.recsys.application.gateway} production code right now. On
+     * conforming code the latter is always empty: every proxy frame runs on an event loop.
      */
-    private static int nonEventLoopThreadsInsideProxy() {
-        int n = 0;
+    private record Sample(int nonEventLoopThreads, Set<Thread> insideGateway) {}
+
+    private static Sample sample() {
+        int threads = 0;
+        Set<Thread> inside = new HashSet<>();
         for (Map.Entry<Thread, StackTraceElement[]> e : Thread.getAllStackTraces().entrySet()) {
-            if (e.getKey().getName().startsWith("armeria-common-worker")) continue;
+            Thread thread = e.getKey();
+            if (isCommonEventLoop(thread)) continue;
+            threads++;
             for (StackTraceElement frame : e.getValue()) {
-                if (frame.getClassName().startsWith(LlmProxyService.class.getName())) {
-                    n++;
+                if (isProductionGatewayClass(frame.getClassName())) {
+                    inside.add(thread);
                     break;
                 }
             }
         }
-        return n;
+        return new Sample(threads, inside);
     }
 
-    /** SSE frames end with a blank line; a chunk may carry several or a fraction of one. */
-    private static int countFrames(String chunk) {
-        int count = 0;
-        int i = 0;
-        while ((i = chunk.indexOf("\n\n", i)) >= 0) {
-            count++;
-            i += 2;
+    /** By identity, not by name: survives an Armeria rename and never mistakes a look-alike. */
+    private static boolean isCommonEventLoop(Thread thread) {
+        for (EventExecutor loop : CommonPools.workerGroup()) {
+            if (loop.inEventLoop(thread)) return true;
         }
-        return count;
+        return false;
+    }
+
+    /**
+     * Gateway-package production code only. Sibling test classes share the package and the
+     * Surefire fork (this class's own sampling thread and upstream emitter among them), and a
+     * leftover task from one of them must not read as "the proxy is on a foreign thread".
+     */
+    private static boolean isProductionGatewayClass(String className) {
+        if (!className.startsWith(GATEWAY_PACKAGE)) return false;
+        int nested = className.indexOf('$');
+        String topLevel = nested < 0 ? className : className.substring(0, nested);
+        return !topLevel.endsWith("Test");
     }
 }

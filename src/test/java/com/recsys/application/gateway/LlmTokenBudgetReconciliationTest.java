@@ -12,7 +12,6 @@ import com.linecorp.armeria.common.HttpStatus;
 import com.linecorp.armeria.common.MediaType;
 import com.linecorp.armeria.common.RequestHeaders;
 import com.linecorp.armeria.common.ResponseHeaders;
-import com.linecorp.armeria.server.ServerBuilder;
 import com.linecorp.armeria.testing.junit5.server.ServerExtension;
 import com.recsys.infrastructure.cache.LlmResponseCache;
 import com.recsys.ratelimit.LlmTokenRateLimiter;
@@ -20,7 +19,6 @@ import com.recsys.resilience.RouteCircuitBreaker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -43,9 +41,7 @@ class LlmTokenBudgetReconciliationTest {
     private static final int ACTUAL_COMPLETION_TOKENS = 500;
 
     @RegisterExtension
-    static final ServerExtension upstream = new ServerExtension() {
-        @Override
-        protected void configure(ServerBuilder sb) {
+    static final ServerExtension upstream = LlmProxyTestServers.upstream(sb -> {
             // OpenAI-compatible SSE: content frames, then a terminal usage frame, then [DONE].
             sb.service("/openai", (ctx, req) -> {
                 HttpResponseWriter w = HttpResponse.streaming();
@@ -76,8 +72,7 @@ class LlmTokenBudgetReconciliationTest {
             sb.service("/buffered", (ctx, req) -> HttpResponse.of(HttpStatus.OK, MediaType.JSON_UTF_8,
                     "{\"choices\":[{\"text\":\"hello\"}],\"usage\":{\"prompt_tokens\":10,"
                             + "\"completion_tokens\":" + ACTUAL_COMPLETION_TOKENS + "}}"));
-        }
-    };
+    });
 
     /** A budget big enough for the declared cost, far too small for the real one. */
     private static LlmTokenRateLimiter smallBudget() {
@@ -88,17 +83,10 @@ class LlmTokenBudgetReconciliationTest {
     }
 
     private static ServerExtension gateway(LlmTokenRateLimiter limiter) {
-        return new ServerExtension() {
-            @Override
-            protected void configure(ServerBuilder sb) {
-                MicroserviceRoute route = new MicroserviceRoute(
-                        "llm", "/api/llm", "LLM_SERVICE_URL",
-                        URI.create(upstream.httpUri().toString()), "/health", null);
-                sb.serviceUnder("/api/llm", new LlmProxyService(
+        return LlmProxyTestServers.gateway(upstream::httpUri,
+                route -> new LlmProxyService(
                         route, Duration.ofSeconds(30), new RouteCircuitBreaker(),
                         limiter, LlmResponseCache.disabled(), 1_000, 1_000L));
-            }
-        };
     }
 
     private static AggregatedHttpResponse post(ServerExtension gw, String path, String body)

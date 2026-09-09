@@ -142,6 +142,51 @@ nothing for the client-facing leg, whose own liveness comes from the SSE
 keepalive above; see sharp edge 4 for why that distinction was measured rather
 than assumed.
 
+### Measured: the proxy holds no thread per stream
+
+The question "should the LLM client use a different transport for better
+concurrency" came up on 2026-09-09 by way of the Anthropic Python SDK's `aiohttp`
+advice. That advice targets Python's async client and has no counterpart here —
+there is no Python HTTP caller anywhere in the system — but it was worth
+measuring whether the Armeria proxy has the property that advice is after. It
+does. A probe fired N concurrent `stream:true` requests through the real
+`LlmProxyService` at an in-JVM upstream emitting 10 SSE frames 200 ms apart
+(ideal wall 2.0 s), all three servers in one JVM:
+
+| N | Client leg | Completed | Wall time | Peak JVM threads |
+|---|---|---|---|---|
+| 50 | h2c / h1c | 50/50 | 2.5 s / 2.4 s | 20 / 31 |
+| 500 | h2c / h1c | 500/500 | 3.4 s / 3.5 s | 19 / 30 |
+| 2000 | h2c | 2000/2000 | 4.0 s | 18 |
+| 2000 | h1c | 720/2000 | 18.7 s | 30 |
+
+Two thousand simultaneous streams completed on 18 threads, every upstream stream
+on a single Armeria worker (the gateway→upstream leg negotiated one h2c
+connection and multiplexed everything over it). The h1c failure at 2000 is a
+harness artifact, not a proxy defect: the client opened 2000 loopback
+connections in one burst against macOS's 128-entry accept backlog and Armeria's
+default 3200 ms connect timeout fired first. It was not diagnosed further; the
+production shape — a burst of new HTTP/1.1 connections from the ALB to one
+pod — is unmeasured.
+
+`LlmProxyStreamConcurrencyTest` pins the property: 200 concurrent streams must
+complete with every frame, a mid-burst stack sample must find no thread other
+than an Armeria event loop inside `LlmProxyService`, and the JVM may grow by at
+most 32 threads. It was proven red against a mutation that runs
+`forwardStreaming` on the blocking executor (198 and 176 foreign threads
+sampled). The stack sample is the primary signal because thread growth alone is
+order-dependent: the pool threads a regression spawns in the first test method
+outlive it and become the second method's baseline, which is exactly how the
+first version of the test missed the mutation in one of its two methods.
+
+Armeria's `ClientFactoryBuilder` does expose the knobs that would tune upstream
+fan-out if it were ever needed — `maxNumEventLoopsPerEndpoint`,
+`maxNumEventLoopsPerHttp1Endpoint`, `maxNumRequestsPerConnection`,
+`useHttp2Preface`, `preferHttp1`, `useHttp1Pipelining`. None is set on the LLM
+factory, deliberately: nothing measured needs them, and `ClientFactoryOptions`
+offers no getter for the event-loop count, so a test could not pin a chosen
+value anyway.
+
 ## 7. Sharp edges worth flagging
 
 1. **The 10 s server request timeout used to cap every LLM call — measured, and

@@ -66,6 +66,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -82,9 +83,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * pinned here so a future change that wraps {@code forwardStreaming} in a blocking task
  * fails loudly instead of quietly capping the proxy at the blocking executor's size.
  *
- * <p>The primary signal is thread growth, not wall time: a thread-per-stream regression
- * grows the JVM by roughly N threads, which no CI runner's load can mask, whereas a tight
- * timing bound would flake. The wall-time ceiling is deliberately loose — it exists only to
+ * <p>Two signals, neither timing-based. The primary one is a mid-burst stack sample: no
+ * thread other than an Armeria event loop may be inside {@code LlmProxyService} while streams
+ * are in flight. It is order-independent, which matters — the secondary signal, JVM thread
+ * growth during the burst, is not: a blocking-executor regression grows the JVM by ~N threads
+ * on the first test method to run, but those pool threads outlive that method and become the
+ * baseline of the next one, whose growth check then passes. Both are kept; the growth number
+ * is the one a human reads. The wall-time ceiling is deliberately loose — it exists only to
  * catch full serialization (N × stream duration), not to measure latency.
  *
  * <p>Both an h2c and an h1c client leg are exercised because they hit different
@@ -218,8 +223,16 @@ class LlmProxyStreamConcurrencyTest {
                     });
         }
 
-        CompletableFuture.allOf(outcomes.toArray(new CompletableFuture[0]))
-                .get(MAX_WALL_MS * 2, TimeUnit.MILLISECONDS);
+        // Sample while the burst is in flight: which threads are inside LlmProxyService right now?
+        CompletableFuture<Void> all = CompletableFuture.allOf(outcomes.toArray(new CompletableFuture[0]));
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(MAX_WALL_MS * 2);
+        int maxForeignThreadsInsideProxy = 0;
+        while (!all.isDone() && System.nanoTime() < deadline) {
+            maxForeignThreadsInsideProxy = Math.max(
+                    maxForeignThreadsInsideProxy, nonEventLoopThreadsInsideProxy());
+            Thread.sleep(25);
+        }
+        all.get(1, TimeUnit.SECONDS);
         long wallMs = (System.nanoTime() - start) / 1_000_000;
         int growth = threads.getPeakThreadCount() - before;
 
@@ -236,6 +249,11 @@ class LlmProxyStreamConcurrencyTest {
         assertThat(frames.get())
                 .as("[%s] every frame of every stream is delivered", clientLeg)
                 .isEqualTo(N * FRAMES);
+        assertThat(maxForeignThreadsInsideProxy)
+                .as("[%s] threads other than Armeria event loops found inside LlmProxyService "
+                        + "while %d streams were in flight — the proxy must run only on event "
+                        + "loops", clientLeg, N)
+                .isZero();
         assertThat(growth)
                 .as("[%s] JVM thread growth while %d streams were in flight — a thread held "
                         + "per stream would grow this by ~%d", clientLeg, N, N)
@@ -244,6 +262,27 @@ class LlmProxyStreamConcurrencyTest {
                 .as("[%s] streams ran concurrently, not serially (serial would be ~%d ms)",
                         clientLeg, (long) N * FRAMES * FRAME_GAP_MS)
                 .isLessThan(MAX_WALL_MS);
+    }
+
+    /**
+     * Threads other than Armeria's event loops that are executing {@code LlmProxyService} code
+     * at this instant. On conforming code this is always 0: every proxy frame runs on an
+     * {@code armeria-common-worker-*} thread. A blocking-executor regression parks ~N
+     * {@code armeria-common-blocking-tasks-*} threads inside the proxy for the life of each
+     * stream, so a 25 ms sampling loop cannot miss it.
+     */
+    private static int nonEventLoopThreadsInsideProxy() {
+        int n = 0;
+        for (Map.Entry<Thread, StackTraceElement[]> e : Thread.getAllStackTraces().entrySet()) {
+            if (e.getKey().getName().startsWith("armeria-common-worker")) continue;
+            for (StackTraceElement frame : e.getValue()) {
+                if (frame.getClassName().startsWith(LlmProxyService.class.getName())) {
+                    n++;
+                    break;
+                }
+            }
+        }
+        return n;
     }
 
     /** SSE frames end with a blank line; a chunk may carry several or a fraction of one. */
@@ -306,7 +345,7 @@ Run:
 ```bash
 JAVA_HOME=/Users/linghuang/Library/Java/JavaVirtualMachines/corretto-17.0.12/Contents/Home mvn -q test -Dtest=LlmProxyStreamConcurrencyTest -DfailIfNoTests=false 2>&1 | grep -E 'thread growth|Expecting|to be less than or equal to|Tests run' | head
 ```
-Expected: both methods FAIL with the assertion message containing `JVM thread growth while 200 streams were in flight` and an actual value near 200 (Armeria's default blocking executor grows on demand up to 200 core threads). Save this output for the PR description.
+Expected: both methods FAIL on the stack-sample assertion, `threads other than Armeria event loops found inside LlmProxyService while 200 streams were in flight`, with an actual value near 200 (Armeria's default blocking executor grows on demand up to 200 core threads). Only the first method to run also trips the thread-growth bound: the pool threads it spawned outlive it and become the next method's baseline. That order-dependence is why the stack sample is the primary signal. Save this output for the PR description.
 
 If the test does *not* fail here, stop: the test has no teeth and must be reworked before anything is committed.
 

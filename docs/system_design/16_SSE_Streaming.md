@@ -133,7 +133,7 @@ is what keeps a long, slow token stream healthy:
 | `LLM_IDLE_TIMEOUT_MS` | 60 000 | Idle-connection reaper |
 | `LLM_PING_INTERVAL_MS` | 20 000 | HTTP/2 keepalive PING — must stay **below** the idle timeout so a quiet stream isn't reaped |
 | `LLM_MAX_RETRY_WAIT_MS` | 30 000 | Cap on honored `Retry-After` (buffered only) |
-| `LLM_SSE_KEEPALIVE_MS` | 15 000 | Gap between `: keep-alive` SSE comment frames on a quiet stream; 0 disables. Must stay well under the ALB's 60 s idle timeout (sharp edge 4) |
+| `LLM_SSE_KEEPALIVE_MS` | 10 000 | Idle threshold and scheduler period for SSE comments; values above 10 000 fail startup, non-positive values disable. Allows margin below CloudFront's 30 s origin read timeout (sharp edge 4) |
 | `LLM_DEFAULT_TOKEN_ESTIMATE` | 1 000 | Token budget when `max_tokens` is absent |
 
 The HTTP/2 PING (`pingIntervalMillis`) — **not** a WebSocket ping — holds the
@@ -296,7 +296,7 @@ value anyway.
      h1c and h2c, because Armeria does not count a connection with an in-flight
      response as idle. The gateway will not cut a slow stream.
 
-   The real exposure is the hop in front. No ingress sets
+   The real exposure is the hops in front. No ingress sets
    `alb.ingress.kubernetes.io/load-balancer-attributes:
    idle_timeout.timeout_seconds`, so the ALB's **60 s default** applies, and
    unlike Armeria it counts a silent streaming connection as idle — while
@@ -304,11 +304,21 @@ value anyway.
    60 s between tokens therefore loses the connection at the load balancer, and
    the client sees the same silent truncation as sharp edge 1.
 
-   `LlmProxyService` now emits `: keep-alive\n\n` every `LLM_SSE_KEEPALIVE_MS`
-   (default 15 000; 0 disables) while a stream is quiet. A leading `:` is the SSE
-   spec's own comment syntax, ignored by `EventSource`, so a conforming client
-   never sees it. Two guards keep the heartbeat from corrupting what it is
-   protecting, and both are mutation-tested:
+   CloudFront is the tighter limit: `scripts/create-cdn-distribution.sh` sets
+   `OriginReadTimeout: 30`. Its [response timeout](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/RequestAndResponseBehaviorCustomOrigin.html#request-custom-response-timeout)
+   applies between response packets, including on a streaming response.
+
+   `LlmProxyService` emits `: keep-alive\n\n` while an SSE stream is quiet.
+   `LLM_SSE_KEEPALIVE_MS` is both the idle threshold and the scheduler period
+   (default and maximum 10 000 ms; non-positive values disable). Larger values
+   fail construction with a configuration error. A data write just after a
+   scheduler tick can suppress the next tick, delaying a comment until nearly
+   **twice** the interval after that write. The 10 s ceiling leaves about 10 s
+   of margin below CloudFront's 30 s timeout; it is not a timing guarantee
+   during event-loop stalls. Explicit overrides above 10 000 must be reduced.
+
+   A leading `:` is the SSE spec's comment syntax, ignored by `EventSource`.
+   Two guards keep the heartbeat from corrupting what it is protecting:
    - **Only for `text/event-stream`.** The passthrough is content-type agnostic;
      a comment line injected into native Ollama NDJSON would hand the client a
      line that is not JSON.
@@ -317,8 +327,10 @@ value anyway.
      half-delivered would splice a comment through the middle of it.
 
    Setting the ALB's `idle_timeout.timeout_seconds` above `LLM_TIMEOUT_MS` is a
-   complementary infra-side knob, not a substitute: the heartbeat also covers
-   CloudFront and any other intermediary.
+   complementary infra-side knob. It does not raise CloudFront's timeout.
+   Heartbeats start only after upstream SSE headers arrive and are suppressed
+   inside a partial frame. Waiting for headers, incomplete frames, non-SSE
+   streams, and explicitly disabled heartbeats remain exposed to hop timeouts.
 
 ## Summary
 

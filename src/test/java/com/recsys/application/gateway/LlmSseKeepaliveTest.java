@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class LlmSseKeepaliveTest {
 
-    private static final long KEEPALIVE_MS = 100;   // scaled down from the 15 s default
+    private static final long KEEPALIVE_MS = 100;   // scaled down from the 10 s default
     private static final long QUIET_GAP_MS = 700;   // several keepalive intervals
 
     @RegisterExtension @Order(1)

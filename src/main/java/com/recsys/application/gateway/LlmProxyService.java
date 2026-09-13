@@ -59,11 +59,13 @@ public final class LlmProxyService implements HttpService {
     public static final int DEFAULT_MAX_RETRY_WAIT_MS = 30_000;
     public static final int DEFAULT_TOKEN_ESTIMATE = 1_000;
     /**
-     * Interval between SSE keepalive comment frames. Must stay well below the ALB's idle timeout
-     * (60 s by default, and no ingress overrides it), which counts a silent streaming connection
-     * as idle even though Armeria itself does not. 0 disables the heartbeat.
+     * Idle threshold and scheduler period for SSE comments. A write just after a tick can defer
+     * the next comment for nearly two periods. Keep margin below the scripted CloudFront origin
+     * read timeout (30 s), which is tighter than the ALB's 60 s idle timeout.
+     * Non-positive values disable the heartbeat.
      */
-    public static final long DEFAULT_SSE_KEEPALIVE_MS = 15_000;
+    public static final long DEFAULT_SSE_KEEPALIVE_MS = 10_000;
+    public static final long MAX_SSE_KEEPALIVE_MS = 10_000;
 
     private static final int SC_TOO_MANY_REQUESTS = 429;
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -136,6 +138,11 @@ public final class LlmProxyService implements HttpService {
                     GatewayAuthenticator authenticator,
                     ClientFactory clientFactory,
                     long sseKeepaliveMs) {
+        if (sseKeepaliveMs > MAX_SSE_KEEPALIVE_MS) {
+            throw new IllegalArgumentException("LLM_SSE_KEEPALIVE_MS must be <= "
+                    + MAX_SSE_KEEPALIVE_MS + " to leave margin below CloudFront's 30 s origin read "
+                    + "timeout; non-positive values disable keepalives (received " + sseKeepaliveMs + ").");
+        }
         // This class is a second forwarding path: it duplicates the credential stripping and
         // identity injection of GatewayRequestForwarder, but it never consults BackendRoutePolicy
         // for the request path at all — no user-scope check, no operator-token check, nothing.
@@ -348,8 +355,8 @@ public final class LlmProxyService implements HttpService {
             /**
              * SSE comment frames keep a hop in front of the gateway from treating a stream that is
              * merely thinking as a dead connection. Armeria holds such a stream open itself, but
-             * the ALB's 60 s idle timeout (unset in every ingress, so the default applies) does
-             * not — and LLM_TIMEOUT_MS allows twice that.
+             * CloudFront's configured 30 s origin read timeout and the ALB's 60 s idle timeout
+             * can close a quiet stream before LLM_TIMEOUT_MS expires.
              *
              * <p>Started only for {@code text/event-stream}: the passthrough forwards whatever the
              * upstream sends, and a comment line injected into native Ollama NDJSON would hand the

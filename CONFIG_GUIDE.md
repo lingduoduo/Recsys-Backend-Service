@@ -168,15 +168,27 @@ and host; malformed values stop gateway startup.
 | `GATEWAY_PUBLIC_PATHS` | `/health` | Comma-separated boundary-matched public paths. Base adds two non-sensitive catalog reads; do not use a broad catalog prefix. |
 | `GATEWAY_ORIGIN_SECRET` | unset | Comma-separated accepted origin secrets; enables direct-origin rejection. Keep in a Secret. |
 | `GATEWAY_DEPRECATION_SUNSET` | unset | ISO-8601 date published as the `Sunset` header on unversioned `/api` paths and the `/api/catalog`, `/api/model`, `/api/online` aliases. Unset or unparseable disables deprecation headers. Base ConfigMap sets `2027-07-27`. |
-| `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED` / `GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS` | `true` / `10000` | Enables and schedules gateway upstream health checks. |
+| `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED` / `GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS` | `true` / `10000` | Enables and schedules GET-based gateway upstream health checks. Catalog and online health handlers reject HEAD with 405; unhealthy endpoints are excluded from request selection. |
 | `RECSYS_LOGIN_API_KEYS` (Spring `recsys.login.api-keys`) | empty | Comma-separated API keys for model-serving `/api/v1/auth/login`; empty disables that login endpoint. Keep keys in a Secret. This is separate from gateway authentication. |
 | `RECSYS_SUBMIT_TOKEN_ENABLED` / `RECSYS_SUBMIT_TOKEN_TTL_SECONDS` / `RECSYS_SUBMIT_TOKEN_KEY_PREFIX` | `false` / `300` / `submit_token:` | Optional one-use Redis token protection for model-serving recommendation submits. TTL must be `1..86400`; a blank prefix resets to `submit_token:`. |
 | `LLM_SERVICE_URL` / `LLM_EXPLANATION_SERVICE_URL` | unset | Register the optional LLM / explanation routes only when explicitly configured. |
 | `LLM_TIMEOUT_MS` / `LLM_CONNECT_TIMEOUT_MS` / `LLM_IDLE_TIMEOUT_MS` / `LLM_PING_INTERVAL_MS` | `120000` / `2000` / `60000` / `20000` ms | LLM proxy request, connect, idle, and ping timeouts. |
+| `LLM_SSE_KEEPALIVE_MS` | `10000` ms | SSE comment idle threshold and scheduler period. Maximum `10000`; larger values fail construction when an LLM route is configured. Non-positive values disable heartbeats. |
 | `LLM_CACHE_MAX_SIZE` / `LLM_CACHE_TTL_SECONDS` | `500` / `300` | LLM response-cache capacity and TTL. |
 | `LLM_TOKEN_RATE_LIMIT_TPS` / `LLM_TOKEN_RATE_LIMIT_BURST` / `LLM_DEFAULT_TOKEN_ESTIMATE` / `LLM_MAX_RETRY_WAIT_MS` | `0` / `0` / `1000` / `30000` ms | LLM token admission, request token estimate, and retry-wait controls. Both token-limit values must be positive to enable the bucket. |
 | `FEATURE_FLAG_ENVIRONMENT_PREFIX` | `FEATURE_FLAG_` | Prefix for environment-backed model feature flags. |
 | `POSTHOG_FEATURE_FLAGS_ENABLED` / `POSTHOG_PROJECT_API_KEY` / `POSTHOG_HOST` / `POSTHOG_FEATURE_FLAGS_TIMEOUT` / `POSTHOG_FEATURE_FLAGS_CACHE_TTL` | `false` / empty / `https://us.i.posthog.com` / `2s` / `60s` | Optional PostHog feature-flag provider settings. Keep the API key in a Secret. |
+
+For LLM streams, `LLM_SSE_KEEPALIVE_MS` leaves margin below the CDN script's
+30-second origin read timeout. The idle check can defer a comment until nearly
+twice the interval after upstream data. Remove or reduce existing overrides
+above `10000` before rollout. Heartbeats require `text/event-stream` and a
+complete frame boundary; they do not protect waiting for upstream headers,
+partial frames, non-SSE responses, or event-loop stalls. `LLM_PING_INTERVAL_MS`
+configures HTTP/2 PINGs on the gateway-to-upstream connection and does not
+replace these client-facing comments. See the
+[SSE guide](docs/system_design/16_SSE_Streaming.md) and
+[CDN runbook](docs/runbooks/cdn-operations.md#llm-streams-close-during-a-quiet-gap).
 
 ## Resilience and overload controls
 

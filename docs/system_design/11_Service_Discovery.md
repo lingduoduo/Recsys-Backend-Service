@@ -135,6 +135,12 @@ So the layers compose cleanly: the registry (or static table) picks the address,
 Armeria's per-connection resolver turns it into an IP under the 30 s Cloud Map
 cache, and the health check decides whether that endpoint is eligible.
 
+Health probes use **GET** explicitly. Catalog and online health handlers are
+GET-only and reject HEAD with 405; relying on Armeria's default HEAD probe
+would remove healthy backends from selection while the gateway's separate
+GET-based `/health` aggregation reported them UP. The GET-only upstream fixture
+in `GatewayUpstreamHealthCheckIntegrationTest` guards this distinction.
+
 ## 4. Observability
 
 When the registry is enabled, the gateway `/health` gains a `registry` section

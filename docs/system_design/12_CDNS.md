@@ -212,6 +212,14 @@ themselves created idempotently by name. Companion scripts: `invalidate-cdn.sh`
 (bulk wildcard invalidation, respects the 1,000-free-path quota) and
 `invalidate-local-cdn.sh` (local stand-in purge).
 
+For LLM SSE traffic, the 30-second origin read timeout is tighter than the
+ALB's 60-second idle timeout. The gateway defaults `LLM_SSE_KEEPALIVE_MS` to
+10000 ms and rejects larger values, allowing margin for an idle check that
+can defer a comment for nearly two periods after upstream data. Non-positive
+values disable comments. Protection requires upstream SSE headers and a
+complete frame boundary; see the [SSE guide](16_SSE_Streaming.md) and
+[CDN troubleshooting steps](../runbooks/cdn-operations.md#llm-streams-close-during-a-quiet-gap).
+
 The full rollout is out-of-band and **order-sensitive** — validate on the raw
 `*.cloudfront.net` name → flip DNS → create the origin Secret → narrow the ALB SG
 to the prefix list → retire the REGIONAL WebACL (reversing the last two steps locks

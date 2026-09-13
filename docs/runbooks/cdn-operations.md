@@ -344,6 +344,34 @@ Do not invalidate per write. A bulk load would issue thousands of calls and exha
 
 Single-item edits need no action: the 300 s fresh window bounds the staleness.
 
+## LLM streams close during a quiet gap
+
+The distribution creation script sets `OriginReadTimeout: 30`. SSE responses
+can therefore be cut off during silence even when the gateway's LLM request
+deadline has not expired. Increasing the ALB idle timeout alone does not change
+this CloudFront limit.
+
+1. Check the gateway's `LLM_SSE_KEEPALIVE_MS` override. The default and maximum
+   are `10000` ms; larger values now fail startup. Remove an old override or
+   reduce it before deploying. Non-positive values explicitly disable comments.
+2. Confirm the upstream returns `text/event-stream` and finishes frames with
+   a blank line. The gateway cannot insert a comment before a complete frame
+   boundary without risking corruption; NDJSON is passed through without SSE
+   comments.
+3. Compare a quiet stream through the gateway with the same request through
+   the CDN. Keep request authentication and the origin-secret requirement in
+   place. Inspect whether silence occurs before headers, within a frame, or
+   between complete frames; only the last case is covered by the heartbeat.
+4. Check for gateway event-loop stalls and verify the deployed distribution's
+   origin read timeout. A comment can arrive nearly two scheduler periods
+   after upstream data; the 10-second ceiling leaves margin below the scripted
+   30-second timeout, but cannot guarantee delivery during a stall.
+
+HTTP/2 PINGs configured by `LLM_PING_INTERVAL_MS` operate on the
+gateway-to-upstream connection; they do not replace client-facing SSE comments.
+See the [configuration reference](../../CONFIG_GUIDE.md) and
+[SSE guide](../system_design/16_SSE_Streaming.md) for the full contract.
+
 ## Monitoring
 
 `CacheHitRate` is an **additional** CloudFront metric, off by default.

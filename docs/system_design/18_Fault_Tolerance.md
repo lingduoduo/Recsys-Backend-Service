@@ -1061,12 +1061,14 @@ How likely is an Error in one of these? `OutOfMemoryError` is the realistic one:
 allocate (Lua results, JSON, scan cursors) and an OOM is raised on whichever thread happens
 to fail the allocation, not on the thread that caused the pressure. The three probes and the
 relay were written with exactly that in mind — the same author's `SplunkHecAppender` says so in
-its comment — and the other five were not, until the four above were moved onto
+its comment — and the other five were not. The sampler, topology refresh, and learner flush now use
 [`resilience/GuardedLoop`](../../src/main/java/com/recsys/resilience/GuardedLoop.java): a
 `Runnable` wrapper that absorbs every `Throwable` but `ThreadDeath`, logs and counts it, and
 exposes the loop's health as a value **read at scrape time** from a success timestamp
 (`recsys_loop_seconds_since_success{loop}`, `-1` before the first success) rather than written by
 the loop — so a loop that stops running shows a growing age instead of a frozen healthy number.
+`WatchdogLock` separately catches renewal failures and checks its local lease deadline
+in `isHeld()`; it does not use `GuardedLoop`.
 `GuardedLoopTest` pins that a scheduled loop keeps running after a `StackOverflowError`; each
 loop's own test pins its Error case, and `WatchdogLockTest`'s two new cases were run against the
 old code first (mutation check: both fail there).

@@ -131,16 +131,16 @@ is what keeps a long, slow token stream healthy:
 | `LLM_TIMEOUT_MS` | 120 000 (120 s) | The whole LLM budget — WebClient `responseTimeoutMillis` **and** the per-request server timeout `LlmProxyService.serve` sets on itself. Before that second binding the untuned 10 s server default cut first (sharp edge 1) |
 | `LLM_CONNECT_TIMEOUT_MS` | 2 000 | Upstream connect timeout |
 | `LLM_IDLE_TIMEOUT_MS` | 60 000 | Idle-connection reaper |
-| `LLM_PING_INTERVAL_MS` | 20 000 | HTTP/2 keepalive PING — must stay **below** the idle timeout so a quiet stream isn't reaped |
+| `LLM_PING_INTERVAL_MS` | 20 000 | Gateway-to-upstream HTTP/2 PING; keep below `LLM_IDLE_TIMEOUT_MS`. Does not protect the client-facing hop |
 | `LLM_MAX_RETRY_WAIT_MS` | 30 000 | Cap on honored `Retry-After` (buffered only) |
 | `LLM_SSE_KEEPALIVE_MS` | 10 000 | Idle threshold and scheduler period for SSE comments; values above 10 000 fail startup, non-positive values disable. Allows margin below CloudFront's 30 s origin read timeout (sharp edge 4) |
 | `LLM_DEFAULT_TOKEN_ESTIMATE` | 1 000 | Token budget when `max_tokens` is absent |
 
-The HTTP/2 PING (`pingIntervalMillis`) — **not** a WebSocket ping — holds the
-gateway→upstream connection open across gaps between token frames. It does
-nothing for the client-facing leg, whose own liveness comes from the SSE
-keepalive above; see sharp edge 4 for why that distinction was measured rather
-than assumed.
+HTTP/2 PING (`pingIntervalMillis`) is configured on the gateway-to-upstream
+client connection. Armeria does not count an in-flight response as idle, so
+PING is not what preserves a quiet response. Client-facing intermediaries
+instead need response bytes, supplied by SSE comments at complete frame
+boundaries. See sharp edge 4 for the measured behavior and remaining limits.
 
 ### Measured: the proxy holds no thread per stream
 
@@ -196,6 +196,23 @@ fan-out if it were ever needed — `maxNumEventLoopsPerEndpoint`,
 factory, deliberately: nothing measured needs them, and `ClientFactoryOptions`
 offers no getter for the event-loop count, so a test could not pin a chosen
 value anyway.
+
+### Maintaining the LLM proxy tests
+
+`LlmProxyTestServers` supplies the shared route, upstream and gateway server
+extensions, and slow-stream emitter. Each test still constructs its own
+`LlmProxyService` to choose the behavior under test. Register upstream before
+gateway with `@RegisterExtension @Order`; JUnit then manages server shutdown.
+The stub disables its own request timeout so timeout tests measure the gateway,
+and the shared scheduler's emitter stops after completion or client cancellation.
+
+The concurrency test exercises h2c and h1c client legs with an HTTP/1.1 upstream
+and the production client factory. Its stack filter excludes test fixtures;
+keep that separation when adding helpers in the gateway package. This checks
+for platform threads held per stream, not event-loop blocking, virtual-thread
+allocation, or production capacity. Run `mvn -Dtest='Llm*Test' test` from the
+repository root and add new regression classes to the resilience profile's
+explicit includes in `pom.xml`.
 
 ## 7. Sharp edges worth flagging
 

@@ -126,6 +126,14 @@ and the check.
 | ONNX contract | `ONNX model has no input named 'item_id'`, `must be INT64 (INT64), got INT32`, `must have rank 1, got rank 2`, `declares unexpected input 'context'`, `has no output named 'score'` | exported model drifted from the serving contract |
 | Smoke inference | `ONNX smoke inference returned N scores for a single-row batch`, `returned a non-finite score` | a session that opens but cannot score |
 
+The production smoke batch uses indices from the bundle's feature configuration:
+the user vocabulary's `__UNK__` index (or its smallest index when `__UNK__` is
+absent) and the smallest item index. An empty vocabulary falls back to 0;
+this does not make an empty or incompatible bundle valid. Legacy locator-based
+constructors without a feature configuration still use user/item row 0. Bundles
+with non-zero vocabulary indices no longer fail startup merely because the
+smoke batch assumed row 0.
+
 Only after the smoke inference does the variant's session report ready. Initialization is
 transactional: a failure closes whatever native state was opened.
 
@@ -140,6 +148,13 @@ in §1.
 |---|---|---|
 | The default/control variant | Startup fails. The pod never passes its startup probe, the rollout stalls at `maxUnavailable: 0`, and the previous ReplicaSet keeps serving. | Pod log (first lines); `ModelServingUnavailable` if the whole fleet is affected |
 | A non-default (treatment) variant | Startup completes. Requests assigned to that bucket are served by control, attributed as control in the response, metrics, and exposure events (`fellBack=true`). After a 60 s cooldown one request retries the build; if the artifact was fixed in the meantime the treatment starts serving without a restart. | `recsys_model_runtime_load_failures_total{variant,phase="warmup"}`, `recsys_abtest_variant_fallback_total{variant}`, `ModelRuntimeLoadFailure` |
+
+Spring registers the variant resolver's warm-up failure listener through
+`@PostConstruct`, before provider warm-up. Code constructing a
+`VariantRuntimeResolver` outside Spring must call `listenForWarmUpFailures()`
+before warm-up, as the service's convenience constructors do. This lets a
+failed treatment enter cooldown immediately without counting the provider's
+warm-up failure twice.
 
 Under overload, the degraded-cache path follows the same rule: a failed or unloaded treatment's
 requests are answered from control's cache, and never trigger a model load.

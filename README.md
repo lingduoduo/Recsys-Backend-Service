@@ -495,6 +495,18 @@ The gateway intentionally returns `503` when any configured upstream route is
 down. Start the missing backend or follow the stable readiness reason in its
 own log and health response.
 
+### An LLM stream closes while waiting for tokens
+
+For optional LLM routes, check `LLM_SSE_KEEPALIVE_MS` in the
+[Configuration Guide](CONFIG_GUIDE.md). Existing overrides above `10000` now
+fail gateway startup; remove the override to use the default or reduce it.
+Non-positive values disable heartbeats.
+
+The gateway emits SSE comments only after a complete frame boundary. Waiting
+for upstream headers or an unfinished frame can still hit an intermediary's
+timeout. See the [CDN troubleshooting steps](docs/runbooks/cdn-operations.md#llm-streams-close-during-a-quiet-gap)
+and [SSE timing details](docs/system_design/16_SSE_Streaming.md).
+
 ### A port is already in use
 
 Identify the listening process, stop the previous local run, or use the

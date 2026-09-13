@@ -197,6 +197,23 @@ factory, deliberately: nothing measured needs them, and `ClientFactoryOptions`
 offers no getter for the event-loop count, so a test could not pin a chosen
 value anyway.
 
+### Maintaining the LLM proxy tests
+
+`LlmProxyTestServers` supplies the shared route, upstream and gateway server
+extensions, and slow-stream emitter. Each test still constructs its own
+`LlmProxyService` to choose the behavior under test. Register upstream before
+gateway with `@RegisterExtension @Order`; JUnit then manages server shutdown.
+The stub disables its own request timeout so timeout tests measure the gateway,
+and the shared scheduler's emitter stops after completion or client cancellation.
+
+The concurrency test exercises h2c and h1c client legs with an HTTP/1.1 upstream
+and the production client factory. Its stack filter excludes test fixtures;
+keep that separation when adding helpers in the gateway package. This checks
+for platform threads held per stream, not event-loop blocking, virtual-thread
+allocation, or production capacity. Run `mvn -Dtest='Llm*Test' test` from the
+repository root and add new regression classes to the resilience profile's
+explicit includes in `pom.xml`.
+
 ## 7. Sharp edges worth flagging
 
 1. **The 10 s server request timeout used to cap every LLM call — measured, and

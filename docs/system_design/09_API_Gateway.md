@@ -256,7 +256,7 @@ attach:
   state machine that also backs the LLM proxy and Redis rate limiter. See
   [Fault Tolerance §1](18_Fault_Tolerance.md#1-request-tier-resilience--circuit-breakers-bulkheads-fault-injection).
 - **Health-checked upstreams + registry resolution** — `UpstreamEndpointGroups` drop
-  a down backend so a request fast-fails `503` instead of hanging, and the opt-in
+  a down backend using **GET** probes so a request fast-fails `503` instead of hanging, and the opt-in
   registry resolves upstream addresses dynamically with static fallback. See the
   [Service Discovery investigation](11_Service_Discovery.md).
 - **The LLM proxy** — `LlmProxyService` proxies LLM routes on a dedicated client with
@@ -267,7 +267,7 @@ attach:
 
 `GET /health`
 ([`GatewayHealthService`](../../src/main/java/com/recsys/application/gateway/GatewayHealthService.java))
-pings every registered downstream **in parallel** (latency is max, not sum) and
+probes every registered downstream with **GET**, **in parallel** (latency is max, not sum) and
 returns two views:
 
 - a deduped **`ports` rollup** — one entry per distinct backend port, plus the
@@ -280,6 +280,14 @@ The overall `status` is `DEGRADED` (HTTP `503`) whenever any backend is down —
 gateway's self-check never masks a failing backend. When the service registry is
 enabled the response also carries a `registry` section (resolution source + snapshot
 age). `/health` is a public path (no auth), so probes always reach it.
+
+The health response and the data-path endpoint groups are separate checks.
+Both use GET: catalog and online handlers implement GET and return 405 for
+HEAD. Before the endpoint groups explicitly selected GET, `/health` could
+report UP while data requests failed with `no healthy endpoint`. Diagnose that
+mismatch using probe logs and the deployed version; do not infer endpoint
+selectability from the aggregation alone. `GatewayUpstreamHealthCheckIntegrationTest`
+uses a GET-only upstream to guard this behavior and runs in the resilience gate.
 
 ## 7. Metrics
 

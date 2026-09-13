@@ -353,8 +353,16 @@ Run the complete ordinary test suite:
 mvn --batch-mode test
 ```
 
-The resilience profile is still a deterministic unit/contract suite. It does
-not opt into the load or Docker tags.
+The resilience profile uses an explicit test allow-list in `pom.xml`; a new
+test class is not automatically part of the PR gate. It includes model artifact
+and ONNX contract checks, variant fallback, recall metrics, deployment manifests,
+GET-only gateway health probes, and LLM streaming regressions. It does not opt
+into the load or Docker tags. Real-model `UserTowerInferenceServiceTest` and
+deadline-sensitive `MultiChannelRecallServiceTest` remain outside this profile.
+
+For LLM proxy changes, run `mvn -Dtest='Llm*Test' test`. The
+[SSE guide](docs/system_design/16_SSE_Streaming.md#maintaining-the-llm-proxy-tests)
+explains the shared fixtures and the limits of the concurrency check.
 
 ### Known clean-checkout artifact limitation
 
@@ -494,6 +502,24 @@ curl --fail http://localhost:8080/health/ready
 The gateway intentionally returns `503` when any configured upstream route is
 down. Start the missing backend or follow the stable readiness reason in its
 own log and health response.
+
+The gateway's data-path endpoint checks and `/health` aggregation both use
+`GET`. Catalog and online health handlers reject `HEAD` with `405`, so use the
+commands above rather than `curl -I`. If `/health` reports a backend UP but
+requests return `503` with `no healthy endpoint`, check the endpoint-probe logs
+and deployed gateway version; the old HEAD-based probe caused this mismatch.
+See [gateway health aggregation](docs/system_design/09_API_Gateway.md#6-health-aggregation).
+
+### Background state is stale while liveness remains healthy
+
+For online serving, inspect `recsys_loop_seconds_since_success{loop}` and
+`recsys_loop_failures_total{loop}` for `shard-topology-refresh`, `learner-flush`,
+and `redis-feature-version-sampler`. An age of `-1` means no successful run yet;
+a growing age means no recent success. `RecsysLoopStale` alerts on prolonged
+staleness. These loops retain their schedules after recoverable body failures,
+including JVM Errors, but a live process alone does not prove they are making
+progress. See [fault-tolerance operations](docs/system_design/18_Fault_Tolerance.md)
+for the alert thresholds and Error-boundary limits.
 
 ### An LLM stream closes while waiting for tokens
 

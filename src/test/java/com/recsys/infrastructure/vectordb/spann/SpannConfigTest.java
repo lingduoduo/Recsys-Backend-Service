@@ -16,7 +16,7 @@ class SpannConfigTest {
         assertThat(c.dir()).isEqualTo(Path.of(System.getProperty("java.io.tmpdir")));
         assertThat(c.postingMax()).isEqualTo(128);
         assertThat(c.postingMin()).isEqualTo(16);
-        assertThat(c.nprobe()).isEqualTo(8);
+        assertThat(c.nprobe()).isEqualTo(128);
         assertThat(c.reassignProbe()).isEqualTo(4);
         assertThat(c.compactRatio()).isEqualTo(0.5);
         assertThat(c.seed()).isEqualTo(42L);

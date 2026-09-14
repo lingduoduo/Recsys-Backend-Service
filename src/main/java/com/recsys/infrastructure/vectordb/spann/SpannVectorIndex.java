@@ -61,6 +61,27 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
     private volatile long deadBytes;       // written under the writer lock only
     private volatile boolean closed;
 
+    private Integer[] slotBoxes = new Integer[16];
+
+    /**
+     * Interned box for a slot number. Every id's map value is a slot, and {@code Integer.valueOf}
+     * caches only −128..127, so a large index would otherwise hold one distinct Integer per entry
+     * (~3.2 MB at 200k) instead of one per slot (~67 KB at 4k). Called only from the constructor
+     * or under {@code writer}, so the plain array needs no synchronisation; the boxes themselves
+     * are immutable and safely published through the concurrent map.
+     */
+    private Integer box(int slot) {
+        if (slot >= slotBoxes.length) {
+            slotBoxes = Arrays.copyOf(slotBoxes, Math.max(slot + 1, slotBoxes.length * 2));
+        }
+        Integer b = slotBoxes[slot];
+        if (b == null) {
+            b = slot;
+            slotBoxes[slot] = b;
+        }
+        return b;
+    }
+
     public SpannVectorIndex(Map<Integer, float[]> embeddings, SpannConfig cfg) {
         this(embeddings, cfg, () -> new MappedPostingStore(cfg.dir(), cfg.regionBytes()));
     }
@@ -128,7 +149,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
             int slot = table.size();
             long off = store.append(new PostingStore.Block(bid, bvec));
             table = table.withAdded(centroids[c], off, m.size());
-            for (int id : m) idMap.put(id, slot);
+            for (int id : m) idMap.put(id, box(slot));
         }
         return table;
     }
@@ -216,7 +237,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
                 long off = s.store().append(new PostingStore.Block(new int[]{id}, new float[][]{vec.clone()}));
                 CentroidTable t = s.table().withAdded(vec.clone(), off, 1);
                 publish(new Snapshot(t, s.store()));
-                idMap.put(id, t.size() - 1);
+                idMap.put(id, box(t.size() - 1));
                 return;
             }
             if (vec.length != dim) {
@@ -239,7 +260,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
                 deadBytes += entryBytes(dim);                            // stale entry left inside old's block
             }
             publish(new Snapshot(t, s.store()));
-            idMap.put(id, target);                                      // linearisation point
+            idMap.put(id, box(target));                                 // linearisation point
             if (t.live(target) > cfg.postingMax()) {
                 t = split(snap, t, target, true);
             }
@@ -324,8 +345,8 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         t = t.withAdded(c[0], offA, idsA.size()).withAdded(c[1], offB, idsB.size());
         int a = t.size() - 2, b = t.size() - 1;
         publish(new Snapshot(t, s.store()));                            // old slot still referenced
-        for (int[] e : idsA) idMap.put(e[0], a);
-        for (int[] e : idsB) idMap.put(e[0], b);
+        for (int[] e : idsA) idMap.put(e[0], box(a));
+        for (int[] e : idsB) idMap.put(e[0], box(b));
         t = t.withKilled(slot);
         deadBytes += 8L + (long) ids.size() * entryBytes(dim);
         publish(new Snapshot(t, s.store()));
@@ -366,8 +387,8 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
             if (!toB.isEmpty()) t = appendTo(s, t, b, toB, vecToB);
             long offStay = s.store().append(block(stayIds, stayVec));
             publish(new Snapshot(t, s.store()));                        // n still points at its old block
-            for (int[] e : toA) idMap.put(e[0], a);
-            for (int[] e : toB) idMap.put(e[0], b);
+            for (int[] e : toA) idMap.put(e[0], box(a));
+            for (int[] e : toB) idMap.put(e[0], box(b));
             deadBytes += 8L + (long) ids.size() * entryBytes(dim);
             t = t.withRepointed(n, offStay, stayIds.size());
             publish(new Snapshot(t, s.store()));
@@ -407,7 +428,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         distanceComputations.add(t.aliveCount());
         t = appendTo(s, t, dest, ids, vecs);
         publish(new Snapshot(t, s.store()));                            // slot still referenced
-        for (int[] e : ids) idMap.put(e[0], dest);
+        for (int[] e : ids) idMap.put(e[0], box(dest));
         t = t.withKilled(slot);
         deadBytes += 8L + (long) ids.size() * entryBytes(dim);
         publish(new Snapshot(t, s.store()));

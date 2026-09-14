@@ -30,7 +30,12 @@ public record SpannConfig(Path dir, int postingMax, int postingMin, int nprobe,
     }
 
     public static SpannConfig defaults() {
-        return new SpannConfig(Path.of(System.getProperty("java.io.tmpdir")), 128, 16, 8, 4, 0.5, 42L,
+        // nprobe=128: measured on the 200k-vector/4184-centroid acceptance corpus
+        // (SpannProbeCurveLoadTest) at 0.986 recall@10 for ~10,000 distance computations per
+        // query — still ~20x below a flat scan of 200,000. nprobe=8 (the prior default) measured
+        // only 0.143 recall there. Math.min(nprobe, slots.length) in search() makes this harmless
+        // on small corpora: it simply probes every centroid.
+        return new SpannConfig(Path.of(System.getProperty("java.io.tmpdir")), 128, 16, 128, 4, 0.5, 42L,
                 DEFAULT_REGION_BYTES);
     }
 

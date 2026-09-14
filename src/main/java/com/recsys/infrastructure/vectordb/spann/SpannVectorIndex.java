@@ -238,6 +238,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
             if (old != null && old != target) {
                 t = mergeIfUnderfull(snap, t, old);
             }
+            compactIfNeeded();
         } finally {
             writer.unlock();
         }
@@ -410,7 +411,46 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         return t;
     }
 
+    // ---------------------------------------------------------------- compaction
+
+    /** Rewrites live entries into a fresh store when dead bytes pass the ratio. Slot numbers survive. */
+    private void compactIfNeeded() {
+        Snapshot s = snap;
+        long bytes = s.store().bytes();
+        if (bytes == 0 || deadBytes <= cfg.compactRatio() * bytes) return;
+        PostingStore fresh = storeFactory.get();
+        CentroidTable t = s.table();
+        CentroidTable nt = CentroidTable.empty();
+        try {
+            for (int slot = 0; slot < t.size(); slot++) {
+                if (!t.alive(slot)) {
+                    nt = nt.withAdded(t.centroid(slot), -1L, 0).withKilled(slot);
+                    continue;
+                }
+                List<int[]> ids = new ArrayList<>();
+                List<float[]> vecs = new ArrayList<>();
+                collectLive(s, slot, Integer.MIN_VALUE, ids, vecs);
+                long off = fresh.append(block(ids, vecs));
+                nt = nt.withAdded(t.centroid(slot), off, ids.size());
+            }
+        } catch (RuntimeException e) {
+            fresh.close();
+            throw e;
+        }
+        long before = bytes, dead = deadBytes;
+        publish(new Snapshot(nt, fresh));
+        deadBytes = 0;
+        s.store().close();                 // the old mapping stays valid for any reader still on it
+        compactions.incrementAndGet();
+        log.info("SPANN compaction: {} bytes ({} dead) -> {} bytes", before, dead, fresh.bytes());
+    }
+
     // ---------------------------------------------------------------- misc
+
+    /** Package-private, for tests that need the live store (e.g. to assert the file was swapped). */
+    Snapshot snapshotForTests() {
+        return snap;
+    }
 
     @Override
     public String name() {

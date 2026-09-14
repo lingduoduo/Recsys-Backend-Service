@@ -339,6 +339,8 @@
                 <include>**/ratelimit/RedisRateLimiterTest.java</include>
                 <include>**/retrieval/multichannel/*DegradationTest.java</include>
                 <include>**/retrieval/multichannel/*BulkheadTest.java</include>
+                <include>**/vectordb/MultiVectorMathTest.java</include>
+                <include>**/vectordb/ExactMultiVectorIndexTest.java</include>
                 <include>**/outbox/OutboxRelayTest.java</include>
                 <include>**/outbox/OutboxRetryPolicyTest.java</include>
                 <include>**/saga/*OrchestratorTest.java</include>

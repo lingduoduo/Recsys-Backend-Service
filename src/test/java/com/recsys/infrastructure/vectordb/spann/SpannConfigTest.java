@@ -51,7 +51,7 @@ class SpannConfigTest {
     @Test
     void postingMin_mustBeBelowHalfOfPostingMax() {
         // 8 >= 16/2 would let merge and split oscillate on the same posting.
-        assertThatThrownBy(() -> SpannConfig.defaults().withPostingMax(16).withPostingMin(8))
+        assertThatThrownBy(() -> SpannConfig.defaults().withPostingMin(8).withPostingMax(16))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("RECSYS_SPANN_POSTING_MIN");
     }

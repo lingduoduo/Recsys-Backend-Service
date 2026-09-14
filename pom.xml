@@ -348,6 +348,7 @@
                 <include>**/spann/MappedPostingStoreTest.java</include>
                 <include>**/spann/CentroidTableTest.java</include>
                 <include>**/spann/SpannVectorIndexSearchTest.java</include>
+                <include>**/spann/SpannVectorIndexUpdateTest.java</include>
                 <include>**/outbox/OutboxRelayTest.java</include>
                 <include>**/outbox/OutboxRetryPolicyTest.java</include>
                 <include>**/saga/*OrchestratorTest.java</include>

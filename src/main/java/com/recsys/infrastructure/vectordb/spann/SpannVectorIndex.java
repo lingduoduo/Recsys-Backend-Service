@@ -193,6 +193,83 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         }
     }
 
+    // ---------------------------------------------------------------- SPFresh: insert / overwrite
+
+    @Override
+    public void addOrUpdate(int id, float[] vec) {
+        if (vec == null) throw new IllegalArgumentException("vector must not be null");
+        writer.lock();
+        try {
+            if (closed) throw new IllegalStateException("SPANN index is closed");
+            Snapshot s = snap;
+            if (s.table().aliveCount() == 0) {
+                dim = vec.length;
+                long off = s.store().append(new PostingStore.Block(new int[]{id}, new float[][]{vec.clone()}));
+                CentroidTable t = s.table().withAdded(vec.clone(), off, 1);
+                publish(new Snapshot(t, s.store()));
+                idMap.put(id, t.size() - 1);
+                return;
+            }
+            if (vec.length != dim) {
+                throw new IllegalArgumentException("vector dimension mismatch: expected " + dim + ", got " + vec.length);
+            }
+            Integer old = idMap.get(id);
+            int target = s.table().nearest(vec);
+            distanceComputations.add(s.table().aliveCount());
+
+            List<int[]> ids = new ArrayList<>();
+            List<float[]> vecs = new ArrayList<>();
+            int liveBefore = collectLive(s, target, id, ids, vecs);
+            ids.add(new int[]{id});
+            vecs.add(vec.clone());
+            long off = s.store().append(block(ids, vecs));
+            CentroidTable t = s.table().withRepointed(target, off, ids.size());
+            deadBytes += 8L + (long) liveBefore * entryBytes(dim);       // the old block is unreferenced now
+            if (old != null && old != target) {
+                t = t.withLive(old, t.live(old) - 1);
+                deadBytes += entryBytes(dim);                            // stale entry left inside old's block
+            }
+            publish(new Snapshot(t, s.store()));
+            idMap.put(id, target);                                      // linearisation point
+        } finally {
+            writer.unlock();
+        }
+    }
+
+    /**
+     * Collects the live entries of {@code slot} (those the id map attributes to it), skipping
+     * {@code skipId}. Returns the number of entries that were live before the skip, i.e. the
+     * live count the old block carried, for dead-bytes accounting.
+     */
+    private int collectLive(Snapshot s, int slot, int skipId, List<int[]> ids, List<float[]> vecs) {
+        PostingStore.Block b = s.store().read(s.table().offset(slot));
+        int liveBefore = 0;
+        for (int i = 0; i < b.count(); i++) {
+            int eid = b.ids()[i];
+            Integer owner = idMap.get(eid);
+            if (owner == null || owner != slot) continue;
+            liveBefore++;
+            if (eid == skipId) continue;
+            ids.add(new int[]{eid});
+            vecs.add(b.vectors()[i]);
+        }
+        return liveBefore;
+    }
+
+    private static PostingStore.Block block(List<int[]> ids, List<float[]> vecs) {
+        int[] bid = new int[ids.size()];
+        float[][] bvec = new float[ids.size()][];
+        for (int i = 0; i < ids.size(); i++) {
+            bid[i] = ids.get(i)[0];
+            bvec[i] = vecs.get(i);
+        }
+        return new PostingStore.Block(bid, bvec);
+    }
+
+    private void publish(Snapshot s) {
+        snap = s;
+    }
+
     // ---------------------------------------------------------------- misc
 
     @Override

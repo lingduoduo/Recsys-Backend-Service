@@ -346,6 +346,7 @@
                 <include>**/spann/SpannConfigTest.java</include>
                 <include>**/spann/KMeansTest.java</include>
                 <include>**/spann/MappedPostingStoreTest.java</include>
+                <include>**/spann/CentroidTableTest.java</include>
                 <include>**/outbox/OutboxRelayTest.java</include>
                 <include>**/outbox/OutboxRetryPolicyTest.java</include>
                 <include>**/saga/*OrchestratorTest.java</include>

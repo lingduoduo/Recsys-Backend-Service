@@ -2,12 +2,15 @@ package com.recsys.infrastructure.vectordb;
 
 import com.recsys.infrastructure.dataloading.DataLoader;
 import com.recsys.infrastructure.dataloading.DataManager;
+import com.recsys.infrastructure.vectordb.spann.SpannConfig;
+import com.recsys.infrastructure.vectordb.spann.SpannVectorIndex;
 import com.recsys.domain.item.Movie;
 import com.recsys.domain.rating.Rating;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -41,13 +44,37 @@ public class CandidateGenerator {
         this.dataManager = dataManager;
         this.movieEmbeddings = DataLoader.loadMovieEmbeddings();
         this.userEmbeddingStore = userEmbeddingStore;
-        this.embeddingIndex = createEmbeddingIndex(movieEmbeddings);
+        this.embeddingIndex = createEmbeddingIndex(movieEmbeddings, null);
         this.embeddingDim = movieEmbeddings.isEmpty()
                 ? 0
                 : movieEmbeddings.values().iterator().next().length;
         log.info("Embedding backend={}, movies={}, userStore={}",
                 embeddingIndex.name(), movieEmbeddings.size(),
                 userEmbeddingStore != null ? "cache+redis" : "classpath");
+    }
+
+    /** Test seam: same as the two-arg constructor but pins the SPANN index directory. */
+    CandidateGenerator(DataManager dataManager, EmbeddingStore userEmbeddingStore, Path spannDir) {
+        this.dataManager = dataManager;
+        this.movieEmbeddings = DataLoader.loadMovieEmbeddings();
+        this.userEmbeddingStore = userEmbeddingStore;
+        this.embeddingIndex = createEmbeddingIndex(movieEmbeddings, spannDir);
+        this.embeddingDim = movieEmbeddings.isEmpty()
+                ? 0
+                : movieEmbeddings.values().iterator().next().length;
+        log.info("Embedding backend={}, movies={}, userStore={}",
+                embeddingIndex.name(), movieEmbeddings.size(),
+                userEmbeddingStore != null ? "cache+redis" : "classpath");
+    }
+
+    /** Name of the vector backend in use ({@code exact}, {@code lsh}, {@code spann}). */
+    public String embeddingBackendName() {
+        return embeddingIndex.name();
+    }
+
+    /** Releases the vector index's resources (the SPANN index file); a no-op for heap backends. */
+    public void close() {
+        embeddingIndex.close();
     }
 
     // Genre-based: for each genre on the seed movie, pull top-rated candidates,
@@ -138,7 +165,7 @@ public class CandidateGenerator {
         return embeddingDim;
     }
 
-    private static VectorIndex createEmbeddingIndex(Map<Integer, float[]> embeddings) {
+    private static VectorIndex createEmbeddingIndex(Map<Integer, float[]> embeddings, Path spannDir) {
         if (embeddings.isEmpty()) return new ExactVectorIndex(Map.of());
 
         String backend = System.getProperty("recsys.vector.backend");
@@ -149,6 +176,11 @@ public class CandidateGenerator {
         return switch (backend.trim().toLowerCase()) {
             case "exact", "flat" -> new ExactVectorIndex(embeddings);
             case "lsh", "ann" -> new LshVectorIndex(embeddings);
+            case "spann" -> {
+                SpannConfig cfg = SpannConfig.fromEnv(System::getenv);
+                if (spannDir != null) cfg = cfg.withDir(spannDir);
+                yield new SpannVectorIndex(embeddings, cfg);
+            }
             case "faiss" -> {
                 log.warn("FAISS backend requested but not enabled in the portable build; falling back to LSH.");
                 yield new LshVectorIndex(embeddings);

@@ -238,6 +238,11 @@ public class RecSysServer {
                 loadShedder.markShuttingDown();   // readiness -> 503 so LBs drain this pod first
                 server.stop().join();
                 GracefulExecutors.shutdownGracefully(executor);
+                try {
+                    candidateGenerator.close();
+                } catch (RuntimeException e) {
+                    log.warn("vector index close failed during shutdown", e);
+                }
                 if (registrar != null) {
                     registrar.close();
                 }

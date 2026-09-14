@@ -543,6 +543,18 @@ class MappedPostingStoreTest {
         s.close();
         assertThatThrownBy(() -> s.append(block(1))).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void readAfterClose_stillServesMappedBlocks() {
+        // A reader pinned on a pre-compaction snapshot may read after the index has closed this
+        // store; the mapped buffers outlive the channel and the directory entry.
+        MappedPostingStore s = new MappedPostingStore(dir, 4096);
+        long off = s.append(block(4, 5, 6));
+        s.close();
+        PostingStore.Block b = s.read(off);
+        assertThat(b.ids()).containsExactly(4, 5, 6);
+        assertThat(b.vectors()[2]).containsExactly(6f, 3f, -6f);
+    }
 }
 ```
 
@@ -697,7 +709,10 @@ public final class MappedPostingStore implements PostingStore {
     public void close() {
         if (closed) return;
         closed = true;
-        regions.clear();
+        // `regions` is deliberately NOT cleared: a reader still pinned on a pre-close snapshot
+        // (compaction swaps stores while searches are in flight) must be able to finish its
+        // reads. The mapped buffers outlive the channel and the directory entry; GC releases
+        // them when this store object becomes unreachable.
         try {
             channel.close();
         } catch (IOException ignored) {
@@ -727,7 +742,7 @@ public final class MappedPostingStore implements PostingStore {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `JAVA_HOME=$(/usr/libexec/java_home -v 17) mvn test -Dtest=MappedPostingStoreTest 2>&1 | grep -E "Tests run:|BUILD"`
-Expected: `Tests run: 7, Failures: 0, Errors: 0`, `BUILD SUCCESS`.
+Expected: `Tests run: 8, Failures: 0, Errors: 0`, `BUILD SUCCESS`.
 
 - [ ] **Step 5: Add to the PR gate and commit**
 
@@ -2151,7 +2166,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -2275,7 +2289,7 @@ Add the accessor and compaction to `SpannVectorIndex`:
         long before = bytes, dead = deadBytes;
         publish(new Snapshot(nt, fresh));
         deadBytes = 0;
-        s.store().close();                 // the old mapping stays valid for any reader still on it
+        s.store().close();                 // readers still pinned on the old snapshot keep reading its mapped regions; the store keeps them after close
         compactions.incrementAndGet();
         log.info("SPANN compaction: {} bytes ({} dead) -> {} bytes", before, dead, fresh.bytes());
     }

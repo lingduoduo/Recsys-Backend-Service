@@ -56,6 +56,22 @@ class CoRatedTokenBagsTest {
     }
 
     @Test
+    void bag_skipsNeighboursWithMismatchedDimension() {
+        // POST /setembedding persists a vector before the dimension check rejects it, so a
+        // wrong-width vector can sit in Redis. sumOfMaxSim returns -inf for the whole bag on any
+        // mismatched pair; if that vector is a neighbour of the seed it would poison the query
+        // bag and every candidate would be dropped — a cached, empty 200. Degrade the bag instead.
+        DataManager data = mock(DataManager.class);
+        EmbeddingStore store = mock(EmbeddingStore.class);
+        when(data.getSimilarMovies(1)).thenReturn(List.of(movie(2), movie(3)));
+        when(store.getEmbeddings(any())).thenReturn(Map.of(1, V1, 2, new float[]{1f, 0f, 0f}, 3, V3));
+
+        Map<Integer, float[][]> bags = new CoRatedTokenBags(store, data).bagsFor(Set.of(1));
+
+        assertThat(bags.get(1)).isDeepEqualTo(new float[][]{V1, V3});
+    }
+
+    @Test
     void bag_omitsItemsWithoutTheirOwnEmbedding() {
         // Neighbours alone are not evidence about the item; without its own vector it is dropped
         // rather than ranked on borrowed tokens.

@@ -55,7 +55,10 @@ public final class CoRatedTokenBags {
             tokens.add(own);
             for (int n : neighbours.get(id)) {
                 float[] v = vectors.get(n);
-                if (v != null) tokens.add(v);
+                // A wrong-width neighbour would make sumOfMaxSim score the whole bag -inf (and,
+                // on the seed's bag, drop every candidate). Degrade the bag instead; the
+                // own-vector-vs-seed comparison still decides this item's own fate.
+                if (v != null && v.length == own.length) tokens.add(v);
             }
             bags.put(id, tokens.toArray(new float[0][]));
         }

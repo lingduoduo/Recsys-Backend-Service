@@ -10,6 +10,7 @@ import com.recsys.config.EnvVars;
 import com.recsys.infrastructure.vectordb.CoRatedTokenBags;
 import com.recsys.infrastructure.vectordb.ExactMultiVectorIndex;
 import com.recsys.infrastructure.vectordb.ExactVectorIndex;
+import com.recsys.infrastructure.vectordb.SearchResult;
 import com.recsys.domain.item.Movie;
 import com.recsys.domain.item.MovieCandidate;
 import com.recsys.domain.recommendation.RecommendationQuery;
@@ -21,7 +22,9 @@ import com.recsys.application.retrieval.multichannel.MultiChannelRecallService;
 import com.recsys.application.retrieval.multichannel.RecallResult;
 import com.recsys.application.retrieval.multichannel.RecallResult.DegradationOutcome;
 
+import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -125,7 +128,10 @@ public final class RecommendationService {
         }
     }
 
-    /** GET /similar — nearest-neighbour movies by embedding cosine similarity. */
+    /**
+     * GET /similar — nearest-neighbour movies by raw inner product over a co-rated candidate set,
+     * or by Sum of MaxSim over token bags when {@link Scoring#SUM_OF_MAXSIM} is configured.
+     */
     public static final class Similar extends BaseApiService {
 
         private static final int LIMIT_PER_GENRE = 50;
@@ -164,10 +170,10 @@ public final class RecommendationService {
                 String raw = env.get(ENV_VAR);
                 if (raw == null || raw.isBlank()) return INNER_PRODUCT;
                 try {
-                    return valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+                    return valueOf(raw.trim().toUpperCase(Locale.ROOT));
                 } catch (IllegalArgumentException e) {
                     throw new IllegalStateException("env var " + ENV_VAR + " must be one of "
-                            + java.util.Arrays.toString(values()) + " (case-insensitive), got: " + raw);
+                            + Arrays.toString(values()) + " (case-insensitive), got: " + raw);
                 }
             }
         }
@@ -244,7 +250,7 @@ public final class RecommendationService {
         }
 
         private List<ScoredMovie> score(int movieId, float[] seedVec, Set<Integer> candidateIds, int k) {
-            List<com.recsys.infrastructure.vectordb.SearchResult> hits = switch (scoring) {
+            List<SearchResult> hits = switch (scoring) {
                 case INNER_PRODUCT -> ExactVectorIndex.search(
                         store.getEmbeddings(candidateIds), seedVec, k, Set.of(movieId));
                 case SUM_OF_MAXSIM -> {

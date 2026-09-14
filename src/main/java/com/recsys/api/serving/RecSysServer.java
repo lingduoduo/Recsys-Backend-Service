@@ -194,7 +194,7 @@ public class RecSysServer {
                     .service(ROUTE_USER_ALIAS, userService)
                     .service(ROUTE_SIMILAR,
                             new OnlineAdmissionControl(new RecommendationService.Similar(embCache,
-                                    DataManager.getInstance(), similarScoring),
+                                    dataManager, similarScoring),
                                     loadShedder, () -> {}))
                     .service(ROUTE_RECOMMENDATION,
                             new OnlineAdmissionControl(recommendationService, loadShedder, () -> {}))

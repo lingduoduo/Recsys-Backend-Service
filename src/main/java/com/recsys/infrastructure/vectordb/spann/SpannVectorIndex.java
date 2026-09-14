@@ -71,6 +71,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         PostingStore store = storeFactory.get();
         try {
             this.snap = new Snapshot(build(embeddings, store), store);
+            rebalanceAfterBuild();
         } catch (RuntimeException e) {
             store.close();
             throw e;
@@ -231,6 +232,9 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
             }
             publish(new Snapshot(t, s.store()));
             idMap.put(id, target);                                      // linearisation point
+            if (t.live(target) > cfg.postingMax()) {
+                t = split(snap, t, target, true);
+            }
         } finally {
             writer.unlock();
         }
@@ -268,6 +272,116 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
 
     private void publish(Snapshot s) {
         snap = s;
+    }
+
+    // ---------------------------------------------------------------- SPFresh: split / reassign
+
+    private void rebalanceAfterBuild() {
+        CentroidTable t = snap.table();
+        for (int slot = 0; slot < t.size(); slot++) {
+            if (t.alive(slot) && t.live(slot) > cfg.postingMax()) {
+                t = split(snap, t, slot, false);
+            }
+        }
+    }
+
+    /**
+     * 2-means the live entries of {@code slot} into two new centroids, then reassigns the
+     * neighbourhood. Returns the table in service afterwards. A posting whose entries cannot be
+     * separated (fewer than two live, or all identical) is left as is.
+     */
+    private CentroidTable split(Snapshot s, CentroidTable t, int slot, boolean cascade) {
+        List<int[]> ids = new ArrayList<>();
+        List<float[]> vecs = new ArrayList<>();
+        collectLive(new Snapshot(t, s.store()), slot, Integer.MIN_VALUE, ids, vecs);
+        // MIN_VALUE is never an id in practice; collectLive's skip is a no-op here.
+        if (ids.size() < 2) return t;
+        float[][] c = KMeans.cluster(vecs, 2, cfg.seed(), SPLIT_ITERATIONS);
+        if (c.length < 2) return t;
+        List<int[]> idsA = new ArrayList<>(), idsB = new ArrayList<>();
+        List<float[]> vecA = new ArrayList<>(), vecB = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) {
+            if (KMeans.l2sq(vecs.get(i), c[0]) <= KMeans.l2sq(vecs.get(i), c[1])) { idsA.add(ids.get(i)); vecA.add(vecs.get(i)); }
+            else { idsB.add(ids.get(i)); vecB.add(vecs.get(i)); }
+        }
+        distanceComputations.add(2L * ids.size());
+        if (idsA.isEmpty() || idsB.isEmpty()) return t;
+
+        long offA = s.store().append(block(idsA, vecA));
+        long offB = s.store().append(block(idsB, vecB));
+        t = t.withAdded(c[0], offA, idsA.size()).withAdded(c[1], offB, idsB.size());
+        int a = t.size() - 2, b = t.size() - 1;
+        publish(new Snapshot(t, s.store()));                            // old slot still referenced
+        for (int[] e : idsA) idMap.put(e[0], a);
+        for (int[] e : idsB) idMap.put(e[0], b);
+        t = t.withKilled(slot);
+        deadBytes += 8L + (long) ids.size() * entryBytes(dim);
+        publish(new Snapshot(t, s.store()));
+        splits.incrementAndGet();
+        log.info("SPANN split: slot {} ({} entries) -> {} ({}) + {} ({})", slot, ids.size(), a, idsA.size(), b, idsB.size());
+        return reassign(s, t, a, b, cascade);
+    }
+
+    /**
+     * SPFresh's bounded rebalancing: only the postings of the {@code reassignProbe} centroids
+     * nearest to each new centroid are examined; an entry moves iff its nearest live centroid
+     * is now one of the two new ones. A far-away entry in a now-suboptimal posting stays until
+     * it is next touched — that is the trade, and 13_DB_Indexing §5 names it.
+     */
+    private CentroidTable reassign(Snapshot s, CentroidTable t, int a, int b, boolean cascade) {
+        if (cfg.reassignProbe() == 0) return t;
+        Set<Integer> neighbours = new java.util.LinkedHashSet<>();
+        for (int n : t.nearestN(t.centroid(a), cfg.reassignProbe(), a, b)) neighbours.add(n);
+        for (int n : t.nearestN(t.centroid(b), cfg.reassignProbe(), a, b)) neighbours.add(n);
+        for (int n : neighbours) {
+            if (!t.alive(n)) continue;
+            List<int[]> ids = new ArrayList<>();
+            List<float[]> vecs = new ArrayList<>();
+            collectLive(new Snapshot(t, s.store()), n, Integer.MIN_VALUE, ids, vecs);
+            List<int[]> stayIds = new ArrayList<>(), toA = new ArrayList<>(), toB = new ArrayList<>();
+            List<float[]> stayVec = new ArrayList<>(), vecToA = new ArrayList<>(), vecToB = new ArrayList<>();
+            for (int i = 0; i < ids.size(); i++) {
+                int nearest = t.nearest(vecs.get(i));
+                if (nearest == a) { toA.add(ids.get(i)); vecToA.add(vecs.get(i)); }
+                else if (nearest == b) { toB.add(ids.get(i)); vecToB.add(vecs.get(i)); }
+                else { stayIds.add(ids.get(i)); stayVec.add(vecs.get(i)); }
+            }
+            distanceComputations.add((long) ids.size() * t.aliveCount());
+            if (toA.isEmpty() && toB.isEmpty()) continue;
+
+            // Destination blocks first (moved entries are stale there until the flip)…
+            if (!toA.isEmpty()) t = appendTo(s, t, a, toA, vecToA);
+            if (!toB.isEmpty()) t = appendTo(s, t, b, toB, vecToB);
+            long offStay = s.store().append(block(stayIds, stayVec));
+            publish(new Snapshot(t, s.store()));                        // n still points at its old block
+            for (int[] e : toA) idMap.put(e[0], a);
+            for (int[] e : toB) idMap.put(e[0], b);
+            deadBytes += 8L + (long) ids.size() * entryBytes(dim);
+            t = t.withRepointed(n, offStay, stayIds.size());
+            publish(new Snapshot(t, s.store()));
+            reassigned.addAndGet(toA.size() + toB.size());
+            if (cascade && stayIds.size() < cfg.postingMin()) {
+                t = mergeIfUnderfull(s, t, n);
+            }
+        }
+        return t;
+    }
+
+    /** Rewrites {@code slot}'s block as its current live entries plus {@code extra}; no id-map change. */
+    private CentroidTable appendTo(Snapshot s, CentroidTable t, int slot, List<int[]> extraIds, List<float[]> extraVecs) {
+        List<int[]> ids = new ArrayList<>();
+        List<float[]> vecs = new ArrayList<>();
+        int liveBefore = collectLive(new Snapshot(t, s.store()), slot, Integer.MIN_VALUE, ids, vecs);
+        ids.addAll(extraIds);
+        vecs.addAll(extraVecs);
+        long off = s.store().append(block(ids, vecs));
+        deadBytes += 8L + (long) liveBefore * entryBytes(dim);
+        return t.withRepointed(slot, off, ids.size());
+    }
+
+    /** Task 8 replaces this stub with the real merge. Until then an underfull posting is left alone. */
+    private CentroidTable mergeIfUnderfull(Snapshot s, CentroidTable t, int slot) {
+        return t;
     }
 
     // ---------------------------------------------------------------- misc

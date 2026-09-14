@@ -301,6 +301,11 @@ public final class OnlinePredictionServer {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 loadShedder.markShuttingDown();   // flip readiness to 503 + shed new load before draining
                 server.stop().join();
+                try {
+                    candidateGenerator.close();
+                } catch (RuntimeException e) {
+                    log.warn("vector index close failed during shutdown", e);
+                }
                 activeAsyncEventPublisher.close();
                 activeReplicaLagProbe.close();
                 activeCacheStatsProbe.close();

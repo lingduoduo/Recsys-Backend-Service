@@ -343,6 +343,19 @@
                 <include>**/vectordb/ExactMultiVectorIndexTest.java</include>
                 <include>**/vectordb/CoRatedTokenBagsTest.java</include>
                 <include>**/serving/SimilarMaxSimScoringTest.java</include>
+                <include>**/spann/SpannConfigTest.java</include>
+                <include>**/spann/KMeansTest.java</include>
+                <include>**/spann/MappedPostingStoreTest.java</include>
+                <include>**/spann/CentroidTableTest.java</include>
+                <include>**/spann/SpannVectorIndexSearchTest.java</include>
+                <include>**/spann/SpannVectorIndexUpdateTest.java</include>
+                <include>**/spann/SpannVectorIndexSplitTest.java</include>
+                <include>**/spann/SpannVectorIndexMergeTest.java</include>
+                <include>**/spann/SpannVectorIndexCompactionTest.java</include>
+                <include>**/spann/SpannVectorIndexConcurrencyTest.java</include>
+                <include>**/spann/SpannVectorIndexPinnedReaderTest.java</include>
+                <include>**/spann/SpannVectorIndexLifecycleTest.java</include>
+                <include>**/vectordb/CandidateGeneratorSpannWiringTest.java</include>
                 <include>**/outbox/OutboxRelayTest.java</include>
                 <include>**/outbox/OutboxRetryPolicyTest.java</include>
                 <include>**/saga/*OrchestratorTest.java</include>

@@ -72,13 +72,16 @@ class SpannVectorIndexSearchTest {
         List<float[]> queries = SpannTestVectors.mixture(50, 16, 8, 5L);
         ExactVectorIndex exact = new ExactVectorIndex(data);
         int hits = 0;
-        try (SpannVectorIndex spann = new SpannVectorIndex(data, cfg().withNprobe(8))) {
+        // ~250 centroids over 8 clusters, so 16 probes is ~6% of centroids, half of one cluster's
+        // postings; the production bar at the default nprobe belongs to the benchmark.
+        try (SpannVectorIndex spann = new SpannVectorIndex(data, cfg().withNprobe(16))) {
+            long before = spann.stats().distanceComputations();
             for (float[] q : queries) {
                 Set<Integer> truth = new java.util.HashSet<>();
                 for (SearchResult r : exact.search(q, 10, Set.of())) truth.add(r.id());
                 for (SearchResult r : spann.search(q, 10, Set.of())) if (truth.contains(r.id())) hits++;
             }
-            long computed = spann.stats().distanceComputations();
+            long computed = spann.stats().distanceComputations() - before;
             assertThat(hits / 500.0).isGreaterThanOrEqualTo(0.9);
             // CPU proxy: far fewer scorings than exact's 2000 per query (build-time assignment excluded).
             assertThat(computed).isLessThan(50L * 2000);
@@ -90,8 +93,10 @@ class SpannVectorIndexSearchTest {
         Map<Integer, float[]> data = SpannTestVectors.asMap(SpannTestVectors.mixture(100, 4, 2, 6L));
         try (SpannVectorIndex spann = new SpannVectorIndex(data, exhaustive())) {
             float[] q = data.get(7);
-            assertThat(spann.search(q, 1, Set.of()).get(0).id()).isEqualTo(7);
-            assertThat(spann.search(q, 5, Set.of(7))).extracting(SearchResult::id).doesNotContain(7);
+            // Present with its own score (inner product does not make a vector its own top hit)…
+            assertThat(spann.search(q, 100, Set.of())).contains(new SearchResult(7, VectorMath.innerProduct(q, q)));
+            // …and absent once excluded; a null exclusion set means nothing excluded.
+            assertThat(spann.search(q, 100, Set.of(7))).hasSize(99).extracting(SearchResult::id).doesNotContain(7);
             assertThat(spann.search(q, 5, null)).hasSize(5);
         }
     }

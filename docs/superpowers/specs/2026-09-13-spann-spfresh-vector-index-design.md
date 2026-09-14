@@ -229,7 +229,7 @@ All read once at construction via `EnvVars`; defaults are the benchmark's parame
 | `RECSYS_SPANN_DIR` | `java.io.tmpdir` | directory for the index file; must be writable |
 | `RECSYS_SPANN_POSTING_MAX` | `128` | split threshold (live entries) |
 | `RECSYS_SPANN_POSTING_MIN` | `16` | merge threshold (live entries) |
-| `RECSYS_SPANN_NPROBE` | `8` | centroids probed per query before widening |
+| `RECSYS_SPANN_NPROBE` | `128` | centroids probed per query before widening (measured probe/recall curve: `SpannProbeCurveLoadTest`, 8 → 0.143 recall on the 200k benchmark corpus) |
 | `RECSYS_SPANN_REASSIGN_PROBE` | `4` | neighbouring centroids checked on split |
 | `RECSYS_SPANN_COMPACT_RATIO` | `0.5` | compaction trigger, dead bytes / file bytes |
 | `RECSYS_SPANN_SEED` | `42` | clustering seed |

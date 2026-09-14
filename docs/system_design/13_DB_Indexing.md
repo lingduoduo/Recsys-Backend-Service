@@ -357,6 +357,130 @@ LSH index merged before a MaxSim rerank — the Manas-style retrieval change, an
 design. `MultiVectorMathTest`, `ExactMultiVectorIndexTest`, `CoRatedTokenBagsTest` and
 `SimilarMaxSimScoringTest` run in the `-Presilience` PR gate.
 
+### Disk-resident ANN: SPANN layout with SPFresh updates
+
+Both heap backends above keep every vector on the heap: `ExactVectorIndex` holds the full map
+and `LshVectorIndex` sits on top of it and falls back to scanning it whenever the bucket set
+is thin. `RECSYS_VECTOR_BACKEND=spann` selects
+[`SpannVectorIndex`](../../src/main/java/com/recsys/infrastructure/vectordb/spann/SpannVectorIndex.java),
+which keeps only a centroid table and an id→posting map in heap and puts the vectors in
+posting lists in a memory-mapped file. Design:
+[2026-09-13-spann-spfresh-vector-index-design.md](../superpowers/specs/2026-09-13-spann-spfresh-vector-index-design.md).
+
+**Layout.** Build runs k-means++/Lloyd on a sample and assigns every vector to its nearest
+centroid by L2; each posting is an immutable block at the file tail; the table maps a centroid
+to its block offset. A query scores all live centroids (in heap) by **inner product**, probes
+the `nprobe` highest, reads those blocks, and scores their entries by inner product through
+`VectorMath`, so a `SearchResult.score` means the same thing as in the other backends. The
+partition is L2 and the probe is inner product on purpose, as in FAISS's inner-product IVF:
+a posting's entries are its centroid plus small noise, so the postings with the highest
+⟨query, centroid⟩ are the ones holding the highest ⟨query, entry⟩ — whereas the inner-product
+top hits sit at the far edge of a cluster along the query's direction, at a *typical* L2
+distance from the query, so L2-nearest probing would mostly miss them. SPANN's `(1 + ε)`
+distance pruning is an L2 device with no clean inner-product form, so there is none; `nprobe`
+is the knob and the benchmark measures recall against exact rather than assuming it. Equal
+scores order by id ascending in both the top-k cut and the output, as `ExactMultiVectorIndex`
+does. If a probe returns fewer than `k`, the probe count doubles up to every centroid — the
+same fallback `LshVectorIndex` has, but paid in block reads instead of a heap-wide scan.
+
+**Liveness is the id map, not a tombstone.** An entry read from posting `c` counts iff the
+concurrent id map says `id → c`. An overwrite appends a new block, publishes the table, and
+then flips the map, so a reader never sees two versions of an id and never sees a torn block;
+search also dedups by id. Readers never block and pin one snapshot (table + store) per search.
+
+**One measured consequence, and it is a real serving property.** Blocks come from the pinned
+snapshot but liveness comes from the live id map, so a search that pinned its snapshot *before*
+a cross-posting move and scans *after* the flip finds the id stale in its old posting and
+absent from the new posting's pre-move block: that one in-flight search misses the id entirely.
+`SpannVectorIndexPinnedReaderTest` forces the interleaving with a blocking store and measures
+it — 0 occurrences, never duplicated. The window is one search long and self-heals, and an id
+is never returned twice or with a torn vector, but a candidate can silently drop out of a
+single response while its posting is being rebalanced. So the guarantee this backend offers is
+"never two versions, never a torn block" — not "always visible": a candidate can vanish from
+one response during rebalancing and reappear on the next request.
+`SpannVectorIndexConcurrencyTest` cannot see this (its violation set checks duplicates,
+ordering, unknown ids and scores, not absence), which is why the property is measured
+separately rather than asserted as an invariant.
+
+**SPFresh, bounded on purpose.** Insert rewrites the nearest posting. Past
+`RECSYS_SPANN_POSTING_MAX` the posting 2-means-splits into two new centroids, and
+*reassignment* then checks only the postings of the `RECSYS_SPANN_REASSIGN_PROBE` centroids
+nearest each new one, moving an entry iff its nearest centroid is now one of the two. That is
+the "lightweight" in SPFresh's LIRE: a far-away entry in a now-suboptimal posting stays until
+it is next touched — the trade the paper makes, named here so nobody reads it as a bug. Below
+`RECSYS_SPANN_POSTING_MIN` a posting merges into its nearest neighbour (which may then split
+once, without cascading). When dead bytes pass `RECSYS_SPANN_COMPACT_RATIO` of the file the
+live entries are rewritten into a fresh file and the old one deleted; slot numbers survive
+compaction so the id map needs no rewrite. Every rebalancing step runs synchronously inside
+the `/setembedding` that triggered it — no background loop to guard.
+
+**Configuration.** All read once at startup; an invalid value fails the boot, naming the
+variable. `RECSYS_SPANN_DIR` (default `java.io.tmpdir`; the file is per process, deleted on
+shutdown, and nothing persists), `RECSYS_SPANN_POSTING_MAX` (128), `RECSYS_SPANN_POSTING_MIN`
+(16; must be below half of max or merge and split would oscillate), `RECSYS_SPANN_NPROBE`
+(128), `RECSYS_SPANN_REASSIGN_PROBE` (4), `RECSYS_SPANN_COMPACT_RATIO` (0.5), `RECSYS_SPANN_SEED`
+(42). In k8s an `emptyDir` is enough for the directory; note that a mapped file's pages are
+page cache, which the cgroup charges but can reclaim — a soft cost, unlike heap.
+
+**Why 128, not the textbook-small 8.** A first pass at `nprobe = 8` measured **0.143** recall
+on the 200 000-vector benchmark corpus: at `postingMax` 128, 200 000 vectors build roughly
+4 200 centroids, so 8 probes reach only 0.2% of them. `RECSYS_SPANN_NPROBE`'s default was set
+from a measured probe/recall curve on that corpus, not guessed —
+`SpannProbeCurveLoadTest` (4 184 live centroids):
+
+| nprobe | recall@10 | distances/query |
+|---|---|---|
+| 8 | 0.143 | 4 300 |
+| 32 | 0.658 | 5 405 |
+| 128 | 0.986 | 10 084 |
+| 512 | 1.000 | 28 461 |
+| 3 125 | 1.000 | 153 704 |
+
+`Math.min(nprobe, liveCentroids)` makes a probe count of 128 harmless on small corpora: the
+12-movie classpath corpus builds one or two centroids, so a search simply probes all of them
+regardless of the configured `nprobe`. Per-query cost is roughly `liveCentroids +
+nprobe × postingSize`, which is why the centroid scan dominates at small probe counts (the
+step from 8 to 32 probes barely moves distances/query) and probing starts to dominate once
+`nprobe` approaches or exceeds the centroid count.
+
+**Measured envelope (synthetic; the classpath corpus is 12 six-dimensional vectors and can
+show nothing).** `SpannBenchmarkLoadTest` (`@Tag("load")`, run with
+`mvn test -DexcludedGroups="" -Dgroups=load -Dtest=SpannBenchmarkLoadTest`) builds exact, LSH
+and SPANN over 200 000 × 64-dim Gaussian-mixture vectors and asserts, for SPANN only: retained
+heap ≤ 25% of exact, recall@10 ≥ 0.90 against exact at the default `nprobe`, and fewer
+distance computations per query than exact's 200 000. Measured 2026-09-14, x86_64, JVM 17.0.12,
+heap max 2048 MB, 1 000 queries, k=10:
+
+| index | retained heap MB | recall@10 | distances/query | build ms | query ms (1 000) |
+|---|---|---|---|---|---|
+| exact | 66.1 | 1.000 | 200 000 | 34 | 16 029 |
+| lsh | 76.4 | 0.718 | — | 545 | 10 643 |
+| spann | 14.9 | 0.986 | 10 084 | 373 550 | 2 261 |
+
+SPANN retains 22.5% of exact's heap (bar: ≤ 25%), recall@10 0.986 (bar: ≥ 0.90), and 10 084
+distance computations per query against exact's 200 000 (bar: below that). All three bars pass.
+The 373 550 ms (~374 s) build cost is real: it is sample k-means plus assigning 200 000 vectors
+across ~4 200 centroids, and nothing persists across restarts (see Configuration above), so an
+operator turning this backend on pays that cost on every boot, not once.
+
+**Getting under the heap bar took one specific fix.** The id map's values are slot numbers,
+and `Integer.valueOf` caches only −128..127, so a naive `Map<Integer, Integer>` on a
+200 000-entry index would box a distinct `Integer` per entry (~3.2 MB) where ~4 200 shared
+boxes, one per centroid slot, would do (~67 KB). `SpannVectorIndex` interns slot boxes itself
+(`box(int slot)`, an array of cached boxes touched only from the constructor or under the
+writer lock); before that fix retained heap measured 17.8 MB (27.0% of exact, over the 25%
+bar), after it 14.9 MB (22.5%, under it). A primitive `int→int` map (e.g. an open-addressed
+array-backed map) remains the next lever if a larger corpus needs to shave further, but it was
+deliberately **not** taken here: it would put a hand-written concurrent structure under the
+same liveness rule every read depends on (see above), for a saving the interned-box fix already
+delivered at far lower risk.
+
+**What deliberately does not exist.** Persistence across restarts (rebuild on boot, delete on
+shutdown); a graph or tree over centroids — at ~3k centroids a brute-force scan is ~200k
+multiply-adds and the scan becomes the bottleneck only around 10M+ vectors; multi-vector
+postings; native or SIMD kernels; a delete API; Prometheus metrics (the `stats()` snapshot is
+the seam). The default backend stays `lsh` and no manifest sets `spann`.
+
 ## 6. Testing the indexes
 
 - **Static contracts** — `MySqlIndexContractTest` (FORCE INDEX + exact column

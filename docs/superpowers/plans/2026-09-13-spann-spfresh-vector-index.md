@@ -109,7 +109,7 @@ class SpannConfigTest {
     @Test
     void postingMin_mustBeBelowHalfOfPostingMax() {
         // 8 >= 16/2 would let merge and split oscillate on the same posting.
-        assertThatThrownBy(() -> SpannConfig.defaults().withPostingMax(16).withPostingMin(8))
+        assertThatThrownBy(() -> SpannConfig.defaults().withPostingMin(8).withPostingMax(16))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("RECSYS_SPANN_POSTING_MIN");
     }
@@ -207,7 +207,7 @@ public record SpannConfig(Path dir, int postingMax, int postingMin, int nprobe,
 }
 ```
 
-Note `EnvVars.readInt(EnvReader, String, int)` throws `IllegalStateException` naming the variable on a non-numeric value; that is the behaviour `fromEnv_nonNumericFailsNamingTheVariable` pins. `withPostingMax(16)` alone is valid (16 > 2·16... no: default `postingMin` 16 is not `< 16/2`), so the oscillation test's `withPostingMax(16)` already throws before `withPostingMin(8)` runs — that is fine, the message names `RECSYS_SPANN_POSTING_MIN` either way.
+Note `EnvVars.readInt(EnvReader, String, int)` throws `IllegalStateException` naming the variable on a non-numeric value; that is the behaviour `fromEnv_nonNumericFailsNamingTheVariable` pins. The oscillation test sets `postingMin` to 8 first (valid against the default `postingMax` 128) and only then `postingMax` to 16, so the 8 ≥ 16/2 check is the one that throws — reordering the chain would trip on the defaults' `postingMin` of 16 instead and never exercise the boundary.
 
 - [ ] **Step 4: Run test to verify it passes**
 

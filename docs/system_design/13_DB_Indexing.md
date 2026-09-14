@@ -256,6 +256,53 @@ That is a constraint, not a preference — and it would not hold on other engine
 So the honest summary is that this system does plenty of hash-based indexing — just none of
 it inside the relational store, where the engine gives it nowhere to live.
 
+### Multi-vector scoring: Sum of MaxSim
+
+Everything above scores an item by **one** vector — one pooled `float[]` per movie in
+`i2vEmb:<id>`, one per user from the two-tower model, compared by
+[`VectorMath.innerProduct`](../../src/main/java/com/recsys/infrastructure/vectordb/VectorMath.java).
+That is the "two tower" regime: the query is collapsed to a single point before it ever
+meets the corpus, so any token-level structure in the query is gone by retrieval time.
+
+The late-interaction alternative (ColBERT; Pinterest's Manas multi-embedding queries) keeps
+a **bag of token vectors** on both sides and scores a document as
+
+```
+SumOfMaxSim(q, d) = Σ_i max_j ⟨q_i, d_j⟩
+```
+
+— for each query token, the best-matching document token, summed. Two consequences that
+matter for a serving system:
+
+- **Cost is `|q| × |d| × dim` per document**, not `dim`. At corpus scale this is a reranker
+  over a candidate set, not something to run exhaustively; the ANN stage stays
+  single-vector (one search per query token, candidates unioned) and MaxSim decides the
+  final order.
+- **The score is order-free but not pooled.** Shuffling a document's tokens changes
+  nothing; averaging them into one vector would, which is precisely the information a
+  two-tower model throws away.
+
+The primitives live beside the single-vector ones and copy their contract exactly:
+
+- [`MultiVectorMath.sumOfMaxSim`](../../src/main/java/com/recsys/infrastructure/vectordb/MultiVectorMath.java)
+  — raw inner product, no normalisation (callers wanting cosine L2-normalise tokens first,
+  as ColBERT assumes). Null, empty, a null token, or a width mismatch on *any* pair returns
+  `-∞` and never throws, so index code drops the document the same way `ExactVectorIndex`
+  drops an unscorable vector. A width mismatch poisons the whole score rather than the one
+  pair: a partial comparison would still rank the document, silently.
+- [`MultiVectorIndex`](../../src/main/java/com/recsys/infrastructure/vectordb/MultiVectorIndex.java)
+  / [`ExactMultiVectorIndex`](../../src/main/java/com/recsys/infrastructure/vectordb/ExactMultiVectorIndex.java)
+  — the `float[][]` twin of `VectorIndex` / `ExactVectorIndex`: same bounded top-K heap,
+  same exclusion set, same static one-shot `search` over an ad hoc candidate map.
+
+**What does not exist yet, deliberately.** No route consumes these. There is no token-level
+embedding store (Word2Vec yields one vector per movie, the ONNX towers one per user), no
+request type that carries more than one query vector, and no per-token ANN fan-out. Those
+are the retrieval-stack changes Pinterest describes for Manas — a new query type, a parser
+for it, parallel ANN searches merged before rerank — and each is its own design, not a
+side-effect of adding the scorer. `MultiVectorMathTest` and `ExactMultiVectorIndexTest`
+run in the `-Presilience` PR gate.
+
 ## 6. Testing the indexes
 
 - **Static contracts** — `MySqlIndexContractTest` (FORCE INDEX + exact column

@@ -70,6 +70,8 @@ an opt-in benchmark, and the acceptance bar in §Acceptance Criteria is the bar 
 - **A delete API.** `VectorIndex` has no remove; an entry only ever goes stale because the same
   id was overwritten, which hides the previous
   vector of an overwritten id.
+- **Distance pruning.** SPANN's `(1 + ε)` query-aware pruning is an L2 device; probing here is
+  by inner product (§Search), so it is not implemented and there is no `RECSYS_SPANN_PRUNE_EPSILON`.
 - **Prometheus metrics.** No `VectorIndex` has a registry today; threading one through
   `CandidateGenerator` is its own change. The stats snapshot is the seam it would attach to.
 - **Changing the default backend.** `lsh` remains the default; no manifest sets `spann`.
@@ -116,7 +118,10 @@ limit it behaves as a soft cost, unlike heap.
 ## In-Heap State
 
 - **Centroid table**: `float[][] centroid`, `long[] blockOffset`, `int[] live`, `boolean[] alive`,
-  grown by doubling; dead centroids (after split/merge) keep their slot until compaction.
+  grown by doubling; dead centroids (after split/merge) keep their slot for the life of the index —
+  compaction reclaims file bytes, never slot numbers, because the concurrent id map stores slot
+  numbers and renumbering would make a reader's liveness test lie during the swap. A dead slot
+  costs a few bytes of arrays and one shared centroid reference.
 - **Id map**: id → centroid slot of the id's *current* entry (`ConcurrentHashMap`). It is
   both the locator for overwrites and the liveness test on read: an entry `(id, vec)` found in
   centroid `c`'s block is live iff `idMap.get(id) == c`. An overwrite therefore needs no
@@ -148,9 +153,14 @@ update path; the build path validates and throws `IllegalArgumentException` on a
 
 ## Search
 
-1. Compute L2 to every live centroid (in heap). Select the `nprobe` nearest, plus SPANN's
-   query-aware pruning: drop any selected centroid whose distance exceeds
-   `(1 + pruneEpsilon) ×` the nearest, so an isolated query does not pay for far postings.
+1. Score every live centroid (in heap) by **inner product** with the query and select the
+   `nprobe` highest. Probing uses the scoring metric, as FAISS's inner-product IVF does: the
+   inner-product top hits for a query sit at the far edge of its cluster along the query's
+   direction, at a *typical* L2 distance from the query, so the L2-nearest postings would
+   mostly miss them (estimated recall ≈ 0.2 on the benchmark data); the sub-postings whose
+   centroids have the highest inner product with the query are exactly where they live.
+   SPANN's `(1 + ε)` distance pruning is defined on L2 and has no clean inner-product form,
+   so there is no pruning: `nprobe` and the widening fallback are the only controls.
 2. For each selected centroid read its block from the snapshot's mapping and score every entry
    whose id is neither in `excludeIds` nor stale (id map pointing elsewhere), using
   `VectorMath.innerProduct` — the same
@@ -163,10 +173,11 @@ update path; the build path validates and throws `IllegalArgumentException` on a
    repeat, up to all live centroids. This mirrors `LshVectorIndex`'s full-scan fallback but
    costs block reads, not a heap-wide scan.
 
-Metric note: assignment and probing are L2, scoring is inner product. On non-unit vectors
-(the Word2Vec vectors are not normalised) the L2-nearest centroid can miss an inner-product top
-hit; `nprobe` is what covers that and recall against exact is measured by the benchmark, not
-assumed. `nprobe` and `pruneEpsilon` are the two knobs an operator would tune first.
+Metric note: the *partition* is L2 (k-means, insert placement, split, reassign, merge all use
+L2 to the centroid) while *probing and scoring* are inner product. A vector sits in the posting
+of its L2-nearest centroid, so a posting's entries are its centroid plus small noise, and the
+postings with the highest ⟨query, centroid⟩ are the ones holding the highest ⟨query, entry⟩.
+Recall against exact is measured by the benchmark, not assumed; `nprobe` is the knob.
 
 ## SPFresh Update
 
@@ -219,7 +230,6 @@ All read once at construction via `EnvVars`; defaults are the benchmark's parame
 | `RECSYS_SPANN_POSTING_MAX` | `128` | split threshold (live entries) |
 | `RECSYS_SPANN_POSTING_MIN` | `16` | merge threshold (live entries) |
 | `RECSYS_SPANN_NPROBE` | `8` | centroids probed per query before widening |
-| `RECSYS_SPANN_PRUNE_EPSILON` | `0.5` | query-aware pruning ratio (`0` disables) |
 | `RECSYS_SPANN_REASSIGN_PROBE` | `4` | neighbouring centroids checked on split |
 | `RECSYS_SPANN_COMPACT_RATIO` | `0.5` | compaction trigger, dead bytes / file bytes |
 | `RECSYS_SPANN_SEED` | `42` | clustering seed |
@@ -311,6 +321,6 @@ Computes recall@10 of LSH and SPANN against exact, and distance computations per
    retained heap after exact build; recall@10 ≥ 0.90 against exact at the default `nprobe`;
    mean distance computations per query < N. The LSH row is printed, not asserted.
 4. The index file is absent after `RecSysServer`'s shutdown hook runs.
-5. `13_DB_Indexing.md` §5 documents the layout, the L2-vs-inner-product metric note, the
+5. `13_DB_Indexing.md` §5 documents the layout, the L2-partition / inner-product-probe metric note, the
    SPFresh bounded-reassignment trade, the configuration table, the page-cache note for k8s,
    and the measured benchmark numbers with the date and machine they were taken on.

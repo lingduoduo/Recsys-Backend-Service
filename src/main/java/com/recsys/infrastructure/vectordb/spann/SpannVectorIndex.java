@@ -235,6 +235,9 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
             if (t.live(target) > cfg.postingMax()) {
                 t = split(snap, t, target, true);
             }
+            if (old != null && old != target) {
+                t = mergeIfUnderfull(snap, t, old);
+            }
         } finally {
             writer.unlock();
         }
@@ -379,8 +382,31 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         return t.withRepointed(slot, off, ids.size());
     }
 
-    /** Task 8 replaces this stub with the real merge. Until then an underfull posting is left alone. */
+    /**
+     * Merges an underfull posting into its nearest live neighbour. The destination centroid's
+     * vector is left unchanged (as SPFresh does). If the destination overflows it is split once,
+     * without cascading merges — a second overflow waits for the next update.
+     */
     private CentroidTable mergeIfUnderfull(Snapshot s, CentroidTable t, int slot) {
+        if (!t.alive(slot) || t.live(slot) >= cfg.postingMin() || t.aliveCount() <= 1) return t;
+        List<int[]> ids = new ArrayList<>();
+        List<float[]> vecs = new ArrayList<>();
+        collectLive(new Snapshot(t, s.store()), slot, Integer.MIN_VALUE, ids, vecs);
+        int[] nearest = t.nearestN(t.centroid(slot), 1, slot);
+        if (nearest.length == 0) return t;
+        int dest = nearest[0];
+        distanceComputations.add(t.aliveCount());
+        t = appendTo(s, t, dest, ids, vecs);
+        publish(new Snapshot(t, s.store()));                            // slot still referenced
+        for (int[] e : ids) idMap.put(e[0], dest);
+        t = t.withKilled(slot);
+        deadBytes += 8L + (long) ids.size() * entryBytes(dim);
+        publish(new Snapshot(t, s.store()));
+        merges.incrementAndGet();
+        log.info("SPANN merge: slot {} ({} entries) -> {} (now {})", slot, ids.size(), dest, t.live(dest));
+        if (t.live(dest) > cfg.postingMax()) {
+            t = split(s, t, dest, false);
+        }
         return t;
     }
 

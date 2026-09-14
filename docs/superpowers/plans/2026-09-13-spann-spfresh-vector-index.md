@@ -2434,7 +2434,32 @@ class SpannVectorIndexConcurrencyTest {
 - [ ] **Step 2: Run the test and confirm it passes for the right reason**
 
 Run: `JAVA_HOME=$(/usr/libexec/java_home -v 17) mvn test -Dtest=SpannVectorIndexConcurrencyTest 2>&1 | grep -E "Tests run:|BUILD|violations|Expecting"`
-Expected: `Tests run: 1, Failures: 0`. Then prove the test can fail: temporarily swap the two lines `publish(new Snapshot(t, s.store()));` / `idMap.put(id, target);` in `addOrUpdate` (flip before publish), re-run, and expect `violations` to contain `unknown id` or `score ... matches no version` entries. Restore the order, re-run green. Do not commit the swapped order.
+Expected: `Tests run: 1, Failures: 0`, with the run exercising real rebalancing (measured during execution: 896 searches, 85 splits, 17 merges, 16 compactions, `entriesLive` equal to the reference map).
+
+**What this test does and does not discriminate — measured, not assumed.** Swapping the two
+lines `publish(new Snapshot(t, s.store()));` / `idMap.put(id, target);` (flip before publish)
+does NOT make it fail: 25 runs, including a 16-reader / 6 000-write variant, produced zero
+violations. The reason is that the swap's only symptom is a moved id going transiently
+*absent* for a reader pinned on the pre-publish snapshot, and this test's violation set covers
+duplicates, ordering, unknown ids and score-vs-history — never absence. Asserting a presence
+invariant here would be flaky rather than stronger, because blocks come from the pinned
+snapshot while liveness comes from the live `idMap`. Task 10b measures that property directly
+instead.
+
+- [ ] **Step 2b: Measure the pinned-reader move property**
+
+Create `src/test/java/com/recsys/infrastructure/vectordb/spann/SpannVectorIndexPinnedReaderTest.java`:
+a `PostingStore` wrapper that blocks the thread named `pinned-reader` inside its first `read`,
+a reader thread that calls `search` (pinning its snapshot), then `addOrUpdate(3, ...)` on the
+main thread moving id 3 from one blob to the other, then the latch release and `join`. Assert
+the result has no duplicate ids and that id 3 occurs exactly the measured number of times, with
+a comment explaining the mechanism.
+
+**Measured result: 0.** A reader that pinned its snapshot before a cross-posting move finds the
+id stale in its old posting (the live `idMap` now names the new one) and absent from the new
+posting's pre-move block, so the id is invisible to that one in-flight search. It is never
+duplicated. Deterministic across 3 runs with the interleaving verified by latch. This is a
+property of the design, not a defect introduced here, and 13_DB_Indexing §5 documents it.
 
 - [ ] **Step 3: Add to the PR gate and commit**
 
@@ -2840,9 +2865,19 @@ same fallback `LshVectorIndex` has, but paid in block reads instead of a heap-wi
 
 **Liveness is the id map, not a tombstone.** An entry read from posting `c` counts iff the
 concurrent id map says `id → c`. An overwrite appends a new block, publishes the table, and
-then flips the map: a reader sees the old entry until the flip and the new one after, never
-neither and — because search dedups by id — never both. That publish-then-flip order is the
-whole concurrency story; readers never block and pin one snapshot (table + store) per search.
+then flips the map, so a reader never sees two versions of an id and never sees a torn block;
+search also dedups by id. Readers never block and pin one snapshot (table + store) per search.
+
+**One measured consequence, and it is a real serving property.** Blocks come from the pinned
+snapshot but liveness comes from the live id map, so a search that pinned its snapshot *before*
+a cross-posting move and scans *after* the flip finds the id stale in its old posting and
+absent from the new posting's pre-move block: that one in-flight search misses the id entirely.
+`SpannVectorIndexPinnedReaderTest` forces the interleaving with a blocking store and measures
+it — 0 occurrences, never duplicated. The window is one search long and self-heals, and an id
+is never returned twice or with a torn vector, but a candidate can silently drop out of a
+single response while its posting is being rebalanced. `SpannVectorIndexConcurrencyTest` cannot
+see this (its violation set checks duplicates, ordering, unknown ids and scores, not absence),
+which is why the property is measured separately rather than asserted as an invariant.
 
 **SPFresh, bounded on purpose.** Insert rewrites the nearest posting. Past
 `RECSYS_SPANN_POSTING_MAX` the posting 2-means-splits into two new centroids, and

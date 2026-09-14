@@ -250,7 +250,12 @@ merge/split pair could oscillate; that is validated.
   previous snapshot stays published, and `/setembedding` surfaces the existing 500. Reads are
   unaffected. There is no automatic retry.
 - **Readers vs writers**: a search never blocks. It pins one snapshot; every block it reads
-  is immutable; liveness is read through the concurrent id map. A search
+  is immutable; liveness is read through the concurrent id map. **Measured consequence
+  (2026-09-14):** because blocks come from the pinned snapshot while liveness comes from the
+  live id map, a search that pinned before a cross-posting move and scans after the flip misses
+  that id entirely for the duration of that one search — 0 occurrences, never duplicated,
+  forced deterministically by `SpannVectorIndexPinnedReaderTest`. The guarantee is therefore
+  "never two versions, never a torn block", not "always visible". A search
   concurrent with an update may return the pre-update or post-update view of that one id, never
   a torn block and never both versions.
 - **Threads**: no background threads. Every rebalancing step runs synchronously inside the

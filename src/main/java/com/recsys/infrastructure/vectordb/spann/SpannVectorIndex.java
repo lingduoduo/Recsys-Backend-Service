@@ -137,6 +137,14 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
 
     @Override
     public List<SearchResult> search(float[] query, int k, Set<Integer> excludeIds) {
+        return search(query, k, excludeIds, cfg.nprobe());
+    }
+
+    /**
+     * Overload with an explicit initial probe count, so the load-tagged recall/probe sweep can
+     * measure the recall/probe curve on one built index without rebuilding it per probe count.
+     */
+    List<SearchResult> search(float[] query, int k, Set<Integer> excludeIds, int nprobe) {
         Snapshot s = snap;
         if (closed || s == null || query == null || k <= 0 || s.table().aliveCount() == 0) return List.of();
         if (query.length != dim) return List.of();
@@ -157,7 +165,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         PriorityQueue<SearchResult> best = new PriorityQueue<>(WORST_FIRST);
         Set<Integer> seen = new HashSet<>();
         int scanned = 0;
-        int probe = Math.min(cfg.nprobe(), slots.length);
+        int probe = Math.min(nprobe, slots.length);
         while (true) {
             for (; scanned < probe; scanned++) {
                 scanBlock(s, slots[order[scanned]], query, k, excluded, seen, best);

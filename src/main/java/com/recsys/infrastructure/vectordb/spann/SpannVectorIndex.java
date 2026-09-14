@@ -440,7 +440,7 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         long before = bytes, dead = deadBytes;
         publish(new Snapshot(nt, fresh));
         deadBytes = 0;
-        s.store().close();                 // the old mapping stays valid for any reader still on it
+        s.store().close();                 // readers still pinned on the old snapshot keep reading its mapped regions; the store keeps them after close
         compactions.incrementAndGet();
         log.info("SPANN compaction: {} bytes ({} dead) -> {} bytes", before, dead, fresh.bytes());
     }

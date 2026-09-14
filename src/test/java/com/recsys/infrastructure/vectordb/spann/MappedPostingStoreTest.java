@@ -89,4 +89,16 @@ class MappedPostingStoreTest {
         s.close();
         assertThatThrownBy(() -> s.append(block(1))).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void readAfterClose_stillServesMappedBlocks() {
+        // A reader pinned on a pre-compaction snapshot may read after the index has closed this
+        // store; the mapped buffers outlive the channel and the directory entry.
+        MappedPostingStore s = new MappedPostingStore(dir, 4096);
+        long off = s.append(block(4, 5, 6));
+        s.close();
+        PostingStore.Block b = s.read(off);
+        assertThat(b.ids()).containsExactly(4, 5, 6);
+        assertThat(b.vectors()[2]).containsExactly(6f, 3f, -6f);
+    }
 }

@@ -17,8 +17,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * {@code volatile} snapshot publish is the happens-before edge that makes a block visible.
  *
  * <p>Regions are never remapped: growth maps the next region and appends it to a
- * copy-on-write list, so a reader holding an earlier region is unaffected. Old buffers are
- * released by GC — Java offers no safe explicit unmap.
+ * copy-on-write list, so a reader holding an earlier region is unaffected. The region list is
+ * deliberately kept after {@link #close()} so a reader still holding a pre-close snapshot can
+ * finish its reads; the mapped buffers are released by GC once the store object itself becomes
+ * unreachable — Java offers no safe explicit unmap.
  */
 public final class MappedPostingStore implements PostingStore {
 
@@ -105,7 +107,6 @@ public final class MappedPostingStore implements PostingStore {
     public void close() {
         if (closed) return;
         closed = true;
-        regions.clear();
         try {
             channel.close();
         } catch (IOException ignored) {

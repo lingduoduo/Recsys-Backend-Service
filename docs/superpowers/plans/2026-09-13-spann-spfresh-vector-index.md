@@ -2144,6 +2144,7 @@ package com.recsys.infrastructure.vectordb.spann;
 
 import com.recsys.infrastructure.vectordb.ExactVectorIndex;
 import com.recsys.infrastructure.vectordb.SearchResult;
+import com.recsys.infrastructure.vectordb.VectorMath;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -2216,8 +2217,10 @@ class SpannVectorIndexCompactionTest {
             assertThat(idx.stats().entriesLive()).isEqualTo(statsBefore.entriesLive());
             assertThat(idx.stats().fileBytes()).isEqualTo(statsBefore.fileBytes());
             fail.set(false);
-            idx.addOrUpdate(99, new float[]{1f, 1f, 1f, 1f});          // recovers without a rebuild
-            assertThat(idx.search(new float[]{1f, 1f, 1f, 1f}, 1, Set.of()).get(0).id()).isEqualTo(99);
+            float[] v = {1f, 1f, 1f, 1f};
+            idx.addOrUpdate(99, v);                                     // recovers without a rebuild
+            // Present with its own score: a longer aligned vector legitimately outranks it under inner product.
+            assertThat(idx.search(v, 100, Set.of())).contains(new SearchResult(99, VectorMath.innerProduct(v, v)));
         }
     }
 

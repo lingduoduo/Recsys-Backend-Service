@@ -1572,7 +1572,8 @@ class SpannVectorIndexUpdateTest {
 
     @Test
     void overwriteMovingToAnotherPosting_isVisibleExactlyOnce() {
-        try (SpannVectorIndex idx = new SpannVectorIndex(twoBlobs(), cfg())) {
+        // postingMax 16 -> ceil(20 / 8) = 3 centroids over two blobs, so a move can cross postings.
+        try (SpannVectorIndex idx = new SpannVectorIndex(twoBlobs(), cfg().withPostingMax(16))) {
             int before = idx.stats().centroidsLive();
             assertThat(before).isGreaterThanOrEqualTo(2);
             idx.addOrUpdate(3, new float[]{51.05f, 0f});           // moves from blob A to blob B
@@ -1792,24 +1793,28 @@ class SpannVectorIndexSplitTest {
 
     @Test
     void reassignment_movesAVectorThatIsNowNearerToANewCentroid() {
-        // Cluster A at the origin holds p=(4,0) only because B at (10,0) is farther. Inserting
-        // points around (7,0) overflows B; the split yields a centroid near (7,0), and p must move.
+        // Nine points, postingMax 9 -> ceil(9 / 4.5) = 2 centroids: A = four points around the
+        // origin plus p = (4.5, 0) (nearer A's mean (0.9, 0.2) than B's (10.25, 0)), B = four
+        // points around (10, 0). Six inserts around (7.5, 0) all land in B (nearer than A),
+        // overflow it at the 10th entry, and its 2-means split yields centroids ~(7.5, 0) and
+        // ~(10.25, 0). p is now 3.0 from (7.5, 0) but 3.6 from A's mean, so reassignment must
+        // move it; A's other four points stay.
         Map<Integer, float[]> m = new LinkedHashMap<>();
         m.put(0, new float[]{0f, 0f}); m.put(1, new float[]{1f, 0f}); m.put(2, new float[]{0f, 1f}); m.put(3, new float[]{-1f, 0f});
-        m.put(4, new float[]{4f, 0f});                                                  // p
+        m.put(4, new float[]{4.5f, 0f});                                                // p
         m.put(10, new float[]{10f, 0f}); m.put(11, new float[]{10f, 1f}); m.put(12, new float[]{10f, -1f}); m.put(13, new float[]{11f, 0f});
-        try (SpannVectorIndex idx = new SpannVectorIndex(m, cfg(4).withReassignProbe(4))) {
-            // Guard the premise: two centroids, p currently attributed to the origin's slot.
-            assertThat(idx.stats().centroidsLive()).isEqualTo(2);
-            idx.addOrUpdate(20, new float[]{7f, 0f});
-            idx.addOrUpdate(21, new float[]{7f, 1f});
-            idx.addOrUpdate(22, new float[]{7f, -1f});
-            idx.addOrUpdate(23, new float[]{8f, 0f});
+        try (SpannVectorIndex idx = new SpannVectorIndex(m, cfg(9).withReassignProbe(4))) {
+            assertThat(idx.stats().centroidsLive()).isEqualTo(2);          // premise guard
+            int id = 20;
+            for (float[] v : new float[][]{{7f, 0f}, {7f, 1f}, {7f, -1f}, {8f, 0f}, {8f, 1f}, {8f, -1f}}) {
+                idx.addOrUpdate(id++, v);
+            }
             assertThat(idx.stats().splits()).isGreaterThanOrEqualTo(1);
             assertThat(idx.stats().reassigned()).isGreaterThanOrEqualTo(1);
-            // p is still exactly once retrievable, with its own vector.
-            List<SearchResult> all = idx.search(new float[]{4f, 0f}, 50, Set.of());
-            assertThat(all).hasSize(13).contains(new SearchResult(4, 16.0));
+            assertThat(idx.stats().entriesLive()).isEqualTo(15);
+            // p is still exactly once retrievable, with its own vector (4.5^2 = 20.25).
+            List<SearchResult> all = idx.search(new float[]{4.5f, 0f}, 50, Set.of());
+            assertThat(all).hasSize(15).contains(new SearchResult(4, 20.25));
             assertThat(all).extracting(SearchResult::id).doesNotHaveDuplicates();
         }
     }
@@ -1961,7 +1966,7 @@ The stub is the one place this plan defers behaviour, and Task 8 replaces it in 
 Run: `JAVA_HOME=$(/usr/libexec/java_home -v 17) mvn test -Dtest='SpannVectorIndexSplitTest,SpannVectorIndexUpdateTest,SpannVectorIndexSearchTest' 2>&1 | grep -E "Tests run:|BUILD|FAIL"`
 Expected: `Tests run: 17, Failures: 0, Errors: 0`, `BUILD SUCCESS`.
 
-If `reassignment_movesAVectorThatIsNowNearerToANewCentroid` fails on `centroidsLive() == 2` at the premise guard, the build's k-means put the nine points into a different number of clusters; that is `ceil(9 / 2) = 5` centroids requested with many left empty — change the premise guard to `isBetween(2, 5)` and keep the rest, since the property under test is the reassignment, not the initial count.
+If `reassignment_movesAVectorThatIsNowNearerToANewCentroid` fails on the premise guard, k-means++ with seed 42 separated the nine points differently than A/B; report that with the actual centroids rather than loosening the test — the fixture is built so that exactly two centroids exist and the arithmetic in the comment holds.
 
 - [ ] **Step 5: Add to the PR gate and commit**
 
@@ -2502,7 +2507,6 @@ class CandidateGeneratorSpannWiringTest {
     @AfterEach
     void clearProperty() {
         System.clearProperty("recsys.vector.backend");
-        System.clearProperty("recsys.spann.dir.test-override");
     }
 
     @Test

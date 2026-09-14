@@ -330,6 +330,17 @@ never accepting the new secret at all.
 the pods disagree — the most likely cause is step 1 being skipped or not yet rolled out. The
 first rejection also emits one WARN log (only the first, to avoid flooding).
 
+## Changing `/similar` scoring
+
+`RECSYS_SIMILAR_SCORING` (default `inner_product`; alternative `sum_of_maxsim`, see
+[13_DB_Indexing §5](../system_design/13_DB_Indexing.md#5-other-index-types-for-context))
+changes the body `/similar` returns for the same `movieId`/`k`. It is a deployment-level env
+var rather than a query parameter precisely because the cache key whitelists only those two
+params, so after flipping it the edge still holds the other mode's bodies for up to
+`s-maxage` (300 s) plus the stale-while-revalidate window. Treat a flip exactly like a bulk
+embedding reload: roll the pods, then run the invalidation below once. An unknown value
+fails pod startup, so a typo shows up as a crash-looping rollout, not as stale scoring.
+
 ## Freshness after a bulk embedding reload
 
 `POST /setembedding` rewrites the vectors behind `/similar`. After a **bulk** reload, invalidate

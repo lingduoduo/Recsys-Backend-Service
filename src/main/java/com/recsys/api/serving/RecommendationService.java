@@ -6,6 +6,9 @@ import com.linecorp.armeria.common.HttpStatus;
 import com.linecorp.armeria.server.ServiceRequestContext;
 import com.recsys.infrastructure.dataloading.DataManager;
 import com.recsys.infrastructure.vectordb.EmbeddingStore;
+import com.recsys.config.EnvVars;
+import com.recsys.infrastructure.vectordb.CoRatedTokenBags;
+import com.recsys.infrastructure.vectordb.ExactMultiVectorIndex;
 import com.recsys.infrastructure.vectordb.ExactVectorIndex;
 import com.recsys.domain.item.Movie;
 import com.recsys.domain.item.MovieCandidate;
@@ -135,14 +138,53 @@ public final class RecommendationService {
 
         private final EmbeddingStore store;
         private final DataManager dataManager;
+        private final Scoring scoring;
+        private final CoRatedTokenBags tokenBags;
+
+        /**
+         * How candidates are scored against the seed. A deployment-level setting, not a query
+         * parameter: the CDN cache key for this route whitelists only {@code movieId} and
+         * {@code k}, so a per-request switch would let one mode's body be served under the
+         * other mode's key. Flipping it needs a CDN invalidation — docs/runbooks/cdn-operations.md.
+         */
+        public enum Scoring {
+            /** One vector per movie, raw inner product — the original behaviour. */
+            INNER_PRODUCT,
+            /**
+             * Sum of MaxSim over token bags built from the Word2Vec vectors: each movie is its own
+             * vector plus its co-rated neighbours' vectors ({@link CoRatedTokenBags}), and the seed's
+             * bag is the query. Candidate selection, response shape and cache headers are unchanged.
+             */
+            SUM_OF_MAXSIM;
+
+            public static final String ENV_VAR = "RECSYS_SIMILAR_SCORING";
+
+            /** Reads {@link #ENV_VAR}; blank means {@link #INNER_PRODUCT}, anything unknown fails fast. */
+            public static Scoring fromEnv(EnvVars.EnvReader env) {
+                String raw = env.get(ENV_VAR);
+                if (raw == null || raw.isBlank()) return INNER_PRODUCT;
+                try {
+                    return valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalStateException("env var " + ENV_VAR + " must be one of "
+                            + java.util.Arrays.toString(values()) + " (case-insensitive), got: " + raw);
+                }
+            }
+        }
 
         public Similar(EmbeddingStore store) {
             this(store, DataManager.getInstance());
         }
 
         public Similar(EmbeddingStore store, DataManager dataManager) {
+            this(store, dataManager, Scoring.INNER_PRODUCT);
+        }
+
+        public Similar(EmbeddingStore store, DataManager dataManager, Scoring scoring) {
             this.store = store;
             this.dataManager = dataManager;
+            this.scoring = scoring;
+            this.tokenBags = new CoRatedTokenBags(store, dataManager);
         }
 
         @Override
@@ -163,9 +205,7 @@ public final class RecommendationService {
                         return writeNoStoreJson(HttpStatus.NOT_FOUND, Map.of(
                                 "error", "embedding not found for movieId", "movieId", movieId));
                     Set<Integer> candidateIds = selectCandidates(movieId, k);
-                    Map<Integer, float[]> embeddings = store.getEmbeddings(candidateIds);
-                    List<ScoredMovie> scored = ExactVectorIndex.search(embeddings, queryVec, k, Set.of(movieId))
-                            .stream().map(r -> new ScoredMovie(r.id(), r.score())).toList();
+                    List<ScoredMovie> scored = score(movieId, queryVec, candidateIds, k);
                     return writeCacheableJson(HttpStatus.OK,
                             new SimilarMoviesResult(movieId, scored), CACHE_CONTROL, req);
                 } catch (BadRequestException e) {
@@ -201,6 +241,26 @@ public final class RecommendationService {
                 if (candidates.size() >= max) return candidates;
             }
             return candidates;
+        }
+
+        private List<ScoredMovie> score(int movieId, float[] seedVec, Set<Integer> candidateIds, int k) {
+            List<com.recsys.infrastructure.vectordb.SearchResult> hits = switch (scoring) {
+                case INNER_PRODUCT -> ExactVectorIndex.search(
+                        store.getEmbeddings(candidateIds), seedVec, k, Set.of(movieId));
+                case SUM_OF_MAXSIM -> {
+                    // The seed's own bag is the query; candidates' bags are the documents. One bulk
+                    // read covers seed + candidates + all their neighbours.
+                    Set<Integer> withSeed = new LinkedHashSet<>(candidateIds);
+                    withSeed.add(movieId);
+                    Map<Integer, float[][]> bags = tokenBags.bagsFor(withSeed);
+                    float[][] query = bags.get(movieId);
+                    // The seed vector was read a moment ago; a bag can only be missing if it was
+                    // deleted in between. Fall back to the vector we hold rather than 500.
+                    if (query == null) query = new float[][]{seedVec};
+                    yield ExactMultiVectorIndex.search(bags, query, k, Set.of(movieId));
+                }
+            };
+            return hits.stream().map(r -> new ScoredMovie(r.id(), r.score())).toList();
         }
 
         public record ScoredMovie(int movieId, double score) {}

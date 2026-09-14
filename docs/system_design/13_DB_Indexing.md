@@ -323,6 +323,33 @@ can outrank one whose own vector is closer — `SimilarMaxSimScoringTest` pins a
 the two scorers disagree. The classpath dataset is 12 hand-authored 6-dimensional vectors,
 so this is the mechanism, wired and tested, not a measured ranking improvement.
 
+**Measured on a live 6010 against Redis (2026-09-13), one thing the unit tests could not
+show.** With 20 ratings over 12 movies almost everything is co-rated with everything, so the
+bags overlap heavily and the own vector is one token in up to six: for seed 5, three
+candidates scored *exactly* equal under MaxSim (default mode had them 0.86 / 0.57 / 0.36
+apart). Two consequences. First, equal scores must be ordered deterministically, or two pods
+emit different bodies — and different ETags — for the same CDN cache key; `ExactMultiVectorIndex`
+therefore breaks ties by id ascending, in the top-k cut as well as the final sort
+(`ExactVectorIndex` still sorts by score alone, a pre-existing property that only matters
+when ties are common). Second, on a corpus where neighbourhoods are this dense the neighbour
+tokens swamp the own vector; on real data that is a tuning question (weight the own token,
+cap the bag) that should be settled by measurement, not by picking a constant here. Part of
+the tie mechanism is co-rating symmetry: the seed is usually among each co-rated candidate's
+own neighbours, so the seed's first query token finds itself in every such bag and contributes
+the same `‖seed‖²` to each — exact ties then need only the remaining tokens to coincide, which
+on overlapping bags they do.
+
+Two operational edges of the same mode. **Bag construction reads more keys.** The default mode
+bulk-reads the candidate set (up to `k × 5`); MaxSim mode reads that set plus up to five
+neighbours each, so a cold `k=200` request issues roughly six times the Redis reads (chunked
+by `REDIS_EMBEDDING_MGET_BATCH_SIZE`, fronted by `LocalEmbeddingCache`, so it is the first
+request after a flip that shows on a latency graph, not the steady state). **A wrong-width
+vector is contained, not fatal.** `sumOfMaxSim` scores a bag `-∞` on *any* mismatched pair, and
+`POST /setembedding` persists the vector before the dimension check rejects it, so a bad
+vector can sit in Redis; `CoRatedTokenBags` drops a neighbour token whose width differs from
+the item's own vector, so it degrades that bag rather than poisoning the seed's query bag and
+returning an empty, publicly cached 200 for every candidate.
+
 **What still does not exist, deliberately.** No request type carries more than one query
 vector, and there is no per-token ANN fan-out: feeding a user's watched-history vectors into
 `/getrecommendation` as a multi-vector query would need one ANN search per token against the

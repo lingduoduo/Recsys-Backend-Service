@@ -82,6 +82,22 @@ class ExactMultiVectorIndexTest {
     }
 
     @Test
+    void search_breaksExactTiesByIdAscending() {
+        // Seen live: co-rated bags overlap heavily, so equal scores are common. The order of
+        // equal scores must not depend on heap/map iteration, or two pods would emit different
+        // bodies (and ETags) for the same CDN cache key.
+        // Keys chosen so the backing hash map iterates them out of id order (17 and 33 share
+        // a bucket in an 8- or 16-slot table, ahead of 2 and 20); small ascending keys would
+        // pass by accident of Integer hashing.
+        float[][] same = {{1f, 0f}, {0f, 1f}};
+        Map<Integer, float[][]> tied = Map.of(17, same, 33, same, 2, same, 20, same);
+        ExactMultiVectorIndex idx = new ExactMultiVectorIndex(tied);
+        assertThat(idx.search(QUERY, 4, Set.of())).extracting(SearchResult::id).containsExactly(2, 17, 20, 33);
+        // The tiebreak must also decide *which* tied documents survive the top-k cut.
+        assertThat(idx.search(QUERY, 2, Set.of())).extracting(SearchResult::id).containsExactly(2, 17);
+    }
+
+    @Test
     void name_isExactMultiVector() {
         assertThat(new ExactMultiVectorIndex(Map.of()).name()).isEqualTo("exact-multivector");
     }

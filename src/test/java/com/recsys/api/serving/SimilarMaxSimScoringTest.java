@@ -68,6 +68,25 @@ class SimilarMaxSimScoringTest {
         });
     }
 
+    // Store whose bulk read never returns the seed: the single-key read succeeds, so the
+    // handler gets past the 404 check, but the seed has no bag to use as the query.
+    static final EmbeddingStore mockEmbNoSeedBag = mock(EmbeddingStore.class);
+
+    static {
+        when(mockEmbNoSeedBag.getEmbedding(anyInt())).thenReturn(null);
+        when(mockEmbNoSeedBag.getEmbedding(1)).thenReturn(new float[]{1f, 0f});
+        when(mockEmbNoSeedBag.getEmbeddings(any())).thenAnswer(inv -> {
+            Map<Integer, float[]> out = new java.util.HashMap<>();
+            for (Integer id : inv.<java.util.Collection<Integer>>getArgument(0)) {
+                if (id != 1) {
+                    float[] v = mockEmb.getEmbeddings(List.of(id)).get(id);
+                    if (v != null) out.put(id, v);
+                }
+            }
+            return out;
+        });
+    }
+
     @RegisterExtension
     static final ServerExtension server = new ServerExtension() {
         @Override
@@ -75,6 +94,8 @@ class SimilarMaxSimScoringTest {
             sb.service("/similar", new RecommendationService.Similar(mockEmb, mockData));
             sb.service("/similar-maxsim", new RecommendationService.Similar(
                     mockEmb, mockData, RecommendationService.Similar.Scoring.SUM_OF_MAXSIM));
+            sb.service("/similar-maxsim-noseedbag", new RecommendationService.Similar(
+                    mockEmbNoSeedBag, mockData, RecommendationService.Similar.Scoring.SUM_OF_MAXSIM));
         }
     };
 
@@ -98,6 +119,16 @@ class SimilarMaxSimScoringTest {
         assertThat(ids(res)).containsExactly(3, 2, 10);
         JsonNode top = JSON.readTree(res.contentUtf8()).get("similar").get(0);
         assertThat(top.get("score").asDouble()).isCloseTo(1.6, within(1e-6));
+    }
+
+    @Test
+    void maxSimScoring_missingSeedBagFallsBackToTheSeedVector() throws Exception {
+        // Query is then the bare seed vector [1,0]: 2 -> 0.9, 3 -> max(0.6, 0) = 0.6, 10 -> 0.
+        AggregatedHttpResponse res = WebClient.of(server.httpUri()).get("/similar-maxsim-noseedbag?movieId=1&k=3").aggregate().join();
+        assertThat(res.status()).isEqualTo(HttpStatus.OK);
+        assertThat(ids(res)).containsExactly(2, 3, 10);
+        JsonNode top = JSON.readTree(res.contentUtf8()).get("similar").get(0);
+        assertThat(top.get("score").asDouble()).isCloseTo(0.9, within(1e-6));
     }
 
     @Test

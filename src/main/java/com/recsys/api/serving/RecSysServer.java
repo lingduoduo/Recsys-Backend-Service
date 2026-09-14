@@ -181,6 +181,10 @@ public class RecSysServer {
                     EnvConfig.readInt("CATALOG_MAX_CONCURRENT_REQUESTS", 64),
                     EnvConfig.readDouble("CATALOG_DRAIN_UTILIZATION", 0.90));
 
+            RecommendationService.Similar.Scoring similarScoring =
+                    RecommendationService.Similar.Scoring.fromEnv(System::getenv);
+            log.info("/similar scoring={}", similarScoring);
+
             ServerBuilder sb = Server.builder();
             registerMetricsEndpoint(sb, registry);
             sb.http(port)
@@ -189,7 +193,8 @@ public class RecSysServer {
                     .service(ROUTE_USER, userService)
                     .service(ROUTE_USER_ALIAS, userService)
                     .service(ROUTE_SIMILAR,
-                            new OnlineAdmissionControl(new RecommendationService.Similar(embCache),
+                            new OnlineAdmissionControl(new RecommendationService.Similar(embCache,
+                                    DataManager.getInstance(), similarScoring),
                                     loadShedder, () -> {}))
                     .service(ROUTE_RECOMMENDATION,
                             new OnlineAdmissionControl(recommendationService, loadShedder, () -> {}))

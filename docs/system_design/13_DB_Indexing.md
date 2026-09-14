@@ -295,13 +295,40 @@ The primitives live beside the single-vector ones and copy their contract exactl
   — the `float[][]` twin of `VectorIndex` / `ExactVectorIndex`: same bounded top-K heap,
   same exclusion set, same static one-shot `search` over an ad hoc candidate map.
 
-**What does not exist yet, deliberately.** No route consumes these. There is no token-level
-embedding store (Word2Vec yields one vector per movie, the ONNX towers one per user), no
-request type that carries more than one query vector, and no per-token ANN fan-out. Those
-are the retrieval-stack changes Pinterest describes for Manas — a new query type, a parser
-for it, parallel ANN searches merged before rerank — and each is its own design, not a
-side-effect of adding the scorer. `MultiVectorMathTest` and `ExactMultiVectorIndexTest`
-run in the `-Presilience` PR gate.
+**Where the token bags come from: the Word2Vec vectors, not a new model.** There is no
+token-level embedding artifact here (Word2Vec yields one vector per movie, the ONNX towers
+one per user), so
+[`CoRatedTokenBags`](../../src/main/java/com/recsys/infrastructure/vectordb/CoRatedTokenBags.java)
+manufactures a bag per movie out of vectors the system already has: the movie's own vector
+followed by the vectors of its co-rated neighbours (`DataManager.getSimilarMovies`, at most
+5). Bags are read from the `EmbeddingStore`, not the classpath map, in one bulk read over
+items ∪ neighbours, so a vector rewritten by `POST /setembedding` is honoured. A movie with
+no vector of its own is omitted rather than ranked on borrowed neighbour tokens.
+
+**The one consumer: `GET /similar`, behind `RECSYS_SIMILAR_SCORING`.** Default
+`inner_product` is the original single-vector path, byte for byte. `sum_of_maxsim` makes the
+seed's bag the query and the candidates' bags the documents, scored by
+`ExactMultiVectorIndex`; candidate selection, response shape and cache headers do not change.
+This is a deployment-level env var and deliberately **not** a query parameter: the CDN cache
+key for this route whitelists only `movieId` and `k`, so a per-request switch would let one
+mode's body be served under the other mode's key. Flipping it therefore needs a CDN
+invalidation — see the runbook. An unknown value fails startup rather than silently serving
+the default under a flag that says otherwise.
+
+**What that buys, and what it cannot claim.** With single-vector items Sum of MaxSim
+collapses to a pooled query (the max over one document token is trivial, and the sum over
+query tokens is then an inner product against the summed query), so the neighbour tokens on
+the *item* side are what carry any signal: a candidate whose neighbours overlap the seed's
+can outrank one whose own vector is closer — `SimilarMaxSimScoringTest` pins a fixture where
+the two scorers disagree. The classpath dataset is 12 hand-authored 6-dimensional vectors,
+so this is the mechanism, wired and tested, not a measured ranking improvement.
+
+**What still does not exist, deliberately.** No request type carries more than one query
+vector, and there is no per-token ANN fan-out: feeding a user's watched-history vectors into
+`/getrecommendation` as a multi-vector query would need one ANN search per token against the
+LSH index merged before a MaxSim rerank — the Manas-style retrieval change, and its own
+design. `MultiVectorMathTest`, `ExactMultiVectorIndexTest`, `CoRatedTokenBagsTest` and
+`SimilarMaxSimScoringTest` run in the `-Presilience` PR gate.
 
 ## 6. Testing the indexes
 

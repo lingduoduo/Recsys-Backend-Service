@@ -353,6 +353,7 @@
                 <include>**/spann/SpannVectorIndexMergeTest.java</include>
                 <include>**/spann/SpannVectorIndexCompactionTest.java</include>
                 <include>**/spann/SpannVectorIndexConcurrencyTest.java</include>
+                <include>**/spann/SpannVectorIndexPinnedReaderTest.java</include>
                 <include>**/outbox/OutboxRelayTest.java</include>
                 <include>**/outbox/OutboxRetryPolicyTest.java</include>
                 <include>**/saga/*OrchestratorTest.java</include>

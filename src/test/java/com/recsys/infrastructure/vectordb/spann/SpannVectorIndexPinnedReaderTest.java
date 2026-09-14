@@ -59,6 +59,7 @@ class SpannVectorIndexPinnedReaderTest {
             idx.addOrUpdate(3, new float[]{51.05f, 0f});                // move id 3: blob A -> blob B
             moved.countDown();
             reader.join(10_000);
+            assertThat(reader.isAlive()).isFalse();
 
             List<SearchResult> hits = result.get();
             assertThat(hits).extracting(SearchResult::id).doesNotHaveDuplicates();

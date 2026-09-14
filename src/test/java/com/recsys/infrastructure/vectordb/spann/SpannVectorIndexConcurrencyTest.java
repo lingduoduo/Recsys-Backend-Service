@@ -86,10 +86,13 @@ class SpannVectorIndexConcurrencyTest {
                     idx.addOrUpdate(id, v);
                 }
             });
-            writer.get(60, TimeUnit.SECONDS);
-            stop.set(true);
+            try {
+                writer.get(60, TimeUnit.SECONDS);
+            } finally {
+                stop.set(true);
+                pool.shutdownNow();
+            }
             for (Future<?> f : readers) f.get(10, TimeUnit.SECONDS);
-            pool.shutdownNow();
 
             assertThat(violations).isEmpty();
             assertThat(searches.get()).isGreaterThan(100);

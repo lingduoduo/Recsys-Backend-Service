@@ -61,6 +61,8 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
     private volatile long deadBytes;       // written under the writer lock only
     private volatile boolean closed;
 
+    // Written only from the constructor or under `writer` — never touch this outside those paths;
+    // a future idMap.put(...) site added elsewhere without holding `writer` is an obvious hazard.
     private Integer[] slotBoxes = new Integer[16];
 
     /**
@@ -453,7 +455,9 @@ public final class SpannVectorIndex implements VectorIndex, Closeable {
         try {
             for (int slot = 0; slot < t.size(); slot++) {
                 if (!t.alive(slot)) {
-                    nt = nt.withAdded(t.centroid(slot), -1L, 0).withKilled(slot);
+                    // Dead slot: withAdded's vector arg exists only to hold the slot number so
+                    // withKilled can immediately kill it; a dead slot's centroid is never read.
+                    nt = nt.withAdded(null, -1L, 0).withKilled(slot);
                     continue;
                 }
                 List<int[]> ids = new ArrayList<>();

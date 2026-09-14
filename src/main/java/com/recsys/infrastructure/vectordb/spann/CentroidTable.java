@@ -77,9 +77,13 @@ final class CentroidTable {
         if (!alive[slot]) return this;
         boolean[] na = alive.clone();
         int[] nl = live.clone();
+        // Copy-on-write, never an in-place write: other published tables share this array, and
+        // mutating it in place would corrupt a pinned reader's view.
+        float[][] nc = centroid.clone();
         na[slot] = false;
         nl[slot] = 0;
-        return new CentroidTable(centroid, offset, nl, na, size, aliveCount - 1);
+        nc[slot] = null;
+        return new CentroidTable(nc, offset, nl, na, size, aliveCount - 1);
     }
 
     int nearest(float[] q) {

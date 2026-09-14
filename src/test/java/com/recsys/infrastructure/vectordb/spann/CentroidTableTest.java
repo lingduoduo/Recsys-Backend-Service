@@ -46,6 +46,15 @@ class CentroidTableTest {
     }
 
     @Test
+    void withKilled_releasesTheDeadSlotsCentroidWithoutTouchingTheOriginal() {
+        CentroidTable t = three();
+        CentroidTable killed = t.withKilled(1);
+        assertThat(killed.alive(1)).isFalse();
+        assertThat(killed.centroid(1)).isNull();          // the vector is released, not retained
+        assertThat(t.centroid(1)).containsExactly(10f, 0f); // the shared array was copied, not mutated
+    }
+
+    @Test
     void nearest_ignoresDeadSlots() {
         CentroidTable t = three();
         assertThat(t.nearest(new float[]{9f, 0f})).isEqualTo(1);

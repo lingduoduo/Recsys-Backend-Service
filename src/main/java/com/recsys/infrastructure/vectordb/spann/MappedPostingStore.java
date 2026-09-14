@@ -40,7 +40,7 @@ public final class MappedPostingStore implements PostingStore {
                     StandardOpenOption.READ, StandardOpenOption.WRITE);
             path.toFile().deleteOnExit();
         } catch (IOException e) {
-            throw new UncheckedIOException("cannot create SPANN index file in " + dir, e);
+            throw new UncheckedIOException("cannot create SPANN index file " + path, e);
         }
     }
 

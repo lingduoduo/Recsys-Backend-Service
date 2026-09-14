@@ -366,6 +366,10 @@ public class ModelRuntimeProvider implements SmartInitializingSingleton {
             redisItemEmbeddingPool.close();
             redisItemEmbeddingPool = null;
         }
+        if (candidateGenerator != null) {
+            candidateGenerator.close();
+            candidateGenerator = null;
+        }
     }
 
     private synchronized RedisEmbeddingStore redisItemEmbeddingStoreIfEnabled() {

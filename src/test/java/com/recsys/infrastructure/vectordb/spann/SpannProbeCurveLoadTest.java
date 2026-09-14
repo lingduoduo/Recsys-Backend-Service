@@ -20,8 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Measures the recall/nprobe operating curve of a single built SPANN index (built once, since
  * the build takes roughly five minutes) using the package-private probe-count override, so the
  * controller can see what nprobe it actually takes to clear the 0.90 recall bar and what that
- * costs in distance computations. Only the exhaustive-probe recall is asserted; every other row
- * is reported, not asserted.
+ * costs in distance computations. Only the highest-probe-count (3125) row's recall is asserted;
+ * every other row is reported, not asserted. 3125 is not exhaustive — the corpus builds roughly
+ * 4184 live centroids, so even this row still probes fewer than all of them.
  */
 @Tag("load")
 class SpannProbeCurveLoadTest {

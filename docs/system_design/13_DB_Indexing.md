@@ -420,7 +420,11 @@ shutdown, and nothing persists), `RECSYS_SPANN_POSTING_MAX` (128), `RECSYS_SPANN
 (16; must be below half of max or merge and split would oscillate), `RECSYS_SPANN_NPROBE`
 (128), `RECSYS_SPANN_REASSIGN_PROBE` (4), `RECSYS_SPANN_COMPACT_RATIO` (0.5), `RECSYS_SPANN_SEED`
 (42). In k8s an `emptyDir` is enough for the directory; note that a mapped file's pages are
-page cache, which the cgroup charges but can reclaim — a soft cost, unlike heap.
+page cache, which the cgroup charges but can reclaim — a soft cost, unlike heap. That holds for
+the *live* file only: after a compaction, the previous store's mappings stay charged to the
+cgroup until the old snapshot becomes unreachable and is garbage-collected, so under write
+churn a memory limit should budget for both the live and the about-to-be-collected file, not
+just the live one.
 
 **Why 128, not the textbook-small 8.** A first pass at `nprobe = 8` measured **0.143** recall
 on the 200 000-vector benchmark corpus: at `postingMax` 128, 200 000 vectors build roughly
@@ -440,8 +444,14 @@ from a measured probe/recall curve on that corpus, not guessed —
 12-movie classpath corpus builds one or two centroids, so a search simply probes all of them
 regardless of the configured `nprobe`. Per-query cost is roughly `liveCentroids +
 nprobe × postingSize`, which is why the centroid scan dominates at small probe counts (the
-step from 8 to 32 probes barely moves distances/query) and probing starts to dominate once
-`nprobe` approaches or exceeds the centroid count.
+step from 8 to 32 probes is a +25.7% change in distances/query — 4 300 to 5 405, not the
+negligible move "barely moves" would suggest) and probing starts to dominate once `nprobe`
+approaches or exceeds the centroid count. That cost model counts distance computations only:
+selecting the `nprobe` best centroids also sorts every live centroid through boxed `Integer`
+comparisons on every query, which the `distanceComputations` counter does not measure, so the
+reported per-query figures above understate real CPU. Replacing that sort with a bounded
+primitive selection (a partial selection instead of a full `Arrays.sort`) is the next
+optimization and is deliberately not done in this change.
 
 **Measured envelope (synthetic; the classpath corpus is 12 six-dimensional vectors and can
 show nothing).** `SpannBenchmarkLoadTest` (`@Tag("load")`, run with

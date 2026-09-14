@@ -41,16 +41,7 @@ public class CandidateGenerator {
      * file system (Tier 1). Passing {@code null} falls back to classpath-only behaviour.
      */
     public CandidateGenerator(DataManager dataManager, EmbeddingStore userEmbeddingStore) {
-        this.dataManager = dataManager;
-        this.movieEmbeddings = DataLoader.loadMovieEmbeddings();
-        this.userEmbeddingStore = userEmbeddingStore;
-        this.embeddingIndex = createEmbeddingIndex(movieEmbeddings, null);
-        this.embeddingDim = movieEmbeddings.isEmpty()
-                ? 0
-                : movieEmbeddings.values().iterator().next().length;
-        log.info("Embedding backend={}, movies={}, userStore={}",
-                embeddingIndex.name(), movieEmbeddings.size(),
-                userEmbeddingStore != null ? "cache+redis" : "classpath");
+        this(dataManager, userEmbeddingStore, null);
     }
 
     /** Test seam: same as the two-arg constructor but pins the SPANN index directory. */

@@ -59,9 +59,11 @@ an opt-in benchmark, and the acceptance bar in §Acceptance Criteria is the bar 
 - **Persistence across restarts.** The file is rebuilt from the loaded embeddings on every boot
   and deleted on shutdown. Checkpoint, recovery, and a k8s volume are a separate lifecycle.
 - **A graph or tree index over centroids.** SPANN proper uses SPTree over centroids. At the
-  benchmark scale (~200k vectors, posting max 128) there are ~3k centroids and a brute-force
-  L2 scan of them costs ~200k multiply-adds per query; with 8 probes of ~64 entries that is
-  ~230k multiply-adds against exact's 12.8M, roughly 50× fewer. The centroid scan becomes the bottleneck at roughly 10M+
+  benchmark scale (~200k vectors, posting max 128) there are ~4 200 centroids (measured 4 184)
+  and a brute-force L2 scan of them costs ~269k multiply-adds per query (4 200 × 64 dims); at
+  the default `nprobe` of 128 the measured cost is 10 084 distance computations per query, i.e.
+  ~645k multiply-adds, against exact's 12.8M — roughly 20× fewer, not the 50× an earlier
+  `nprobe = 8` estimate implied. The centroid scan becomes the bottleneck at roughly 10M+
   vectors; the spec names that boundary rather than building for it.
 - **Multi-vector postings.** SPANN is single-vector. `ExactMultiVectorIndex` stays the
   reranker for token bags.
@@ -121,7 +123,8 @@ limit it behaves as a soft cost, unlike heap.
   grown by doubling; dead centroids (after split/merge) keep their slot for the life of the index —
   compaction reclaims file bytes, never slot numbers, because the concurrent id map stores slot
   numbers and renumbering would make a reader's liveness test lie during the swap. A dead slot
-  costs a few bytes of arrays and one shared centroid reference.
+  keeps its number and a few bytes of array entries; its centroid vector is released (nulled,
+  copy-on-write) on kill, so dead slots do not retain vectors.
 - **Id map**: id → centroid slot of the id's *current* entry (`ConcurrentHashMap`). It is
   both the locator for overwrites and the liveness test on read: an entry `(id, vec)` found in
   centroid `c`'s block is live iff `idMap.get(id) == c`. An overwrite therefore needs no

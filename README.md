@@ -1,19 +1,29 @@
 # RecSys Backend Service
 
-This repository is a Java 17/Maven recommendation-system backend with four
-independently runnable HTTP services. It includes catalog and recommendation
-serving, online features, ONNX model serving, an API gateway, and the Redis,
-Kafka, and Flink infrastructure used by the local demo.
+A recommendation-system backend built with Java 17 and Maven. Four
+independently runnable HTTP services provide catalog and recommendation APIs,
+online prediction, ONNX model inference, and an API gateway. The local demo
+includes Redis, Kafka, and Flink infrastructure for online features and
+streaming workflows.
 
-![Recsys Backend Pipeline](recsys-architecture.png)
+![RecSys backend architecture](recsys-architecture.png)
 
 > Interactive version: [recsys-architecture.html](recsys-architecture.html)
 
 ## Features
 
-- Online serving and latency, including async APIs, batching, caching, connection pools, timeouts, retries, and graceful fallbacks. 
-- Cache user embeddings, item embeddings, popular-item lists, user recommendation lists, or candidate sets. Know cache-aside patterns, TTL, invalidation, cold-start behavior, and what happens when Redis goes down.
-- Apply availability, eligibility, safety, already-consumed-item removal, diversity, freshness, sponsored-content rules, frequency caps, or deduplication
+- **Recommendation APIs:** catalog reads, embedding-based retrieval, and
+  multi-channel recommendations.
+- **Online prediction:** Redis-backed features, recent user behavior, and
+  trending-item retrieval.
+- **ONNX model serving:** inference, ranking, model version management, and
+  A/B variants.
+- **API gateway:** request routing, authentication, rate limiting, circuit
+  breaking, and upstream health checks.
+- **Serving resilience:** caching, timeouts, fallbacks, load shedding, and
+  readiness checks.
+- **Local streaming workflow:** sample events, replay scripts, and an opt-in
+  Flink job for online features.
 
 ## Repository layout
 
@@ -47,8 +57,7 @@ Configuration and local operation:
 - [Configuration Guide](CONFIG_GUIDE.md) — authoritative environment
   variables, defaults, parsing rules, and deployment overrides.
 - [Online-serving and streaming guide](streaming/online-serving/README.md) —
-  deeper material for sample events, Redis features, and the opt-in Flink
-  workflow; this existing path is linked because there is no `docs/ml/` index.
+  sample events, Redis features, and the opt-in Flink workflow.
 
 ## What runs locally
 
@@ -66,9 +75,9 @@ containers.
 
 MySQL-backed catalog routes are optional and disabled by default. The ordinary
 quick start needs no MySQL server, database migration, cloud credentials, or
-external LLM service. It also avoids the untracked model and Spark artifacts
-that a clean clone cannot generate. The artifact-dependent four-service
-workflow and its explicit gateway authentication choice are documented under
+external LLM service. The repository includes demo ONNX model artifacts for
+the four-service workflow; some Spark tests require a separate pipeline artifact. Full-stack
+setup and gateway authentication options are documented under
 [Common contributor workflows](#common-contributor-workflows).
 
 ## Prerequisites
@@ -175,7 +184,7 @@ on every run. The gateway health contract is described in the
 
 ## Common contributor workflows
 
-### Start the artifact-dependent full stack
+### Start the full local stack
 
 The checkout ships a runnable demo model bundle, all tracked in git:
 `src/main/resources/dssm_model.onnx` (the two-tower ONNX model) and
@@ -191,7 +200,7 @@ A/B variant needs a bundle from the same pipeline. A default-variant bundle that
 fails validation makes model serving **fail during startup**, and the gateway
 aggregate health endpoint stays `503`.
 
-After supplying the artifacts, start the infrastructure and four services:
+To use the checked-in demo artifacts, start the infrastructure and four services:
 
 ```bash
 docker compose -f docker-compose.streaming.yml up -d
@@ -276,8 +285,8 @@ env SERVER_PORT=8080 REDIS_ALLOW_NO_AUTH=true \
   mvn spring-boot:run
 ```
 
-This model command has the same artifact prerequisite as the full-stack
-workflow and will fail without the default variant's model bundle. Check it
+This command uses the checked-in demo model bundle by default. Custom bundles
+must meet the requirements described in the full-stack workflow. Check it
 with `curl --fail http://localhost:8080/health/ready`.
 
 API gateway:
@@ -295,8 +304,8 @@ backends absent.
 
 The anonymous setting in the gateway command is development-only. The wrapper
 loads the repository's checked-in JVM options. Use
-`mvn package -DskipTests` for a fast rebuild and the artifact-dependent
-all-service script when you do not need process-level isolation.
+`mvn package -DskipTests` for a fast rebuild and the all-service script when
+you do not need process-level isolation.
 
 ### Inspect processes and logs
 
@@ -422,7 +431,7 @@ for the maintained commands and artifact paths.
 ## Configuration
 
 The clean-clone quick start uses the catalog port and Redis defaults. The
-artifact-dependent full-stack command explicitly sets
+full-stack command explicitly sets
 `GATEWAY_ALLOW_ANONYMOUS=true` for local development; its script supplies the
 standard service ports and local gateway upstreams. Catalog, Spring model, and
 online recommendation serving also require
@@ -439,7 +448,7 @@ The local settings most often overridden are:
 | `SERVER_PORT` | `8080` | Spring Boot model-serving port |
 | `GATEWAY_PORT` | `8010` | API gateway port |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Host Redis connection |
-| `GATEWAY_ALLOW_ANONYMOUS` | `false` | Development-only opt-in used by the artifact-dependent full-stack command |
+| `GATEWAY_ALLOW_ANONYMOUS` | `false` | Development-only opt-in used by the full-stack command |
 
 Do not copy service, resilience, authentication, or deployment variables into
 new README tables. The authoritative defaults, parsing behavior, Kubernetes

@@ -22,6 +22,8 @@ streaming workflows.
   breaking, and upstream health checks.
 - **Serving resilience:** caching, timeouts, fallbacks, load shedding, and
   readiness checks.
+- **Splunk logging:** optional structured JSON log shipping from all four services
+  through the HTTP Event Collector (HEC).
 - **Local streaming workflow:** sample events, replay scripts, and an opt-in
   Flink job for online features.
 
@@ -117,6 +119,8 @@ Changing a backend port also requires updating its gateway upstream URL. See
 | Redis primary | 6379 | 6379 | Yes |
 | Kafka | 9092 | 9092 | No |
 | Flink dashboard | 8081 | 8081 | No |
+| Splunk web UI | 8000 | 8000 | No — separate Splunk stack |
+| Splunk HEC | 8088 | 8088 | No — separate Splunk stack |
 | ZooKeeper | Not published | 2181 | No |
 | Redis replica | Not published | 6379 | No |
 | Redis Sentinels (three containers) | Not published | 26379 each | No |
@@ -153,6 +157,51 @@ Read the affected Java service's log from the table above. A
 `ClassNotFoundException` for a project class requires a successful rebuild
 before restarting. More diagnostics are in the
 [local troubleshooting guide](docs/runbooks/local-development.md#troubleshooting).
+
+## Optional: Splunk logging
+
+All four services can send structured JSON logs to Splunk HEC. Shipping is off
+until `SPLUNK_HEC_TOKEN` is set; console and `logs/` output remain available.
+Splunk runs separately through [docker-compose.splunk.yml](docker-compose.splunk.yml).
+
+First follow the runbook to [check your Docker host](docs/runbooks/splunk-hec-logging.md#check-the-host-and-docker-daemon)
+and [create stable local credentials](docs/runbooks/splunk-hec-logging.md#create-stable-local-credentials)
+in `/tmp/recsys-splunk.env`. The reference environment is x86_64; Apple Silicon
+setup with Colima/Rosetta is documented there and is best-effort. Reuse the same
+credentials while keeping Splunk's data volumes.
+
+Start Splunk and follow its initializer:
+
+```bash
+docker compose --env-file /tmp/recsys-splunk.env \
+  -f docker-compose.splunk.yml up -d
+docker logs -f splunk-init
+```
+
+Wait for `HEC is accepting events over plain HTTP. Ready.`, then press `Ctrl-C`
+to stop following the log. In the terminal used to start the Java services,
+load the credentials and set the host-accessible HEC endpoint:
+
+```bash
+set -a
+. /tmp/recsys-splunk.env
+set +a
+export SPLUNK_HEC_URL=http://localhost:8088/services/collector/event
+```
+
+Start or restart the services using the [local startup steps](#2-build-and-start).
+The launcher assigns each service its own Splunk source name. Open
+[Splunk Web](http://localhost:8000) and log in as `admin` with the
+`SPLUNK_PASSWORD` from the credential file. Search for application logs with:
+
+```spl
+index=recsys sourcetype="recsys:app:log"
+| stats count by source, level
+```
+
+Log shipping uses a bounded queue and does not retry failed deliveries, so
+Splunk results may omit events. See the [Splunk HEC runbook](docs/runbooks/splunk-hec-logging.md)
+for ingestion checks, configuration, delivery metrics, and troubleshooting.
 
 ## Tests
 

@@ -236,23 +236,36 @@ final class BackendRoutePolicy {
      * {@code GATEWAY_PUBLIC_PATHS} would make its callers anonymous, hence service-tier, hence
      * exempt from the very check declared here.
      *
+     * <p>Walks both {@code EXACT} and {@code PREFIX}: the retrieval surface declares its three
+     * template-path entries ({@code /api/v1/retrieval/recommend}, {@code .../predict}, and
+     * {@code .../users}, all {@code userScoped(UserIdSource.PATH)}) only in {@code PREFIX}, for
+     * the same reason {@link #lookup} consults it — a path template is not a path. A version of
+     * this method that read only {@code EXACT} would leave those three invisible here, so adding
+     * one of them to {@code GATEWAY_PUBLIC_PATHS} would make it anonymous — hence service-tier,
+     * hence exempt from user-scope enforcement — with this very guard reporting nothing wrong.
+     *
      * <p>User-scoped only, deliberately. NO_PROXY paths need no never-public guard because they
      * are not proxied at all, and OPERATOR paths carry their own credential.
      */
     static Set<String> userScopedGatewayPaths(List<MicroserviceRoute> routes) {
         Set<String> paths = new LinkedHashSet<>();
         for (MicroserviceRoute route : routes) {
-            Map<String, Policy> declared = EXACT.get(route.serviceName());
-            if (declared == null) {
-                continue;
-            }
-            declared.forEach((backendPath, policy) -> {
-                if (policy.access() == Access.USER_SCOPED) {
-                    paths.add(route.prefix() + backendPath);
-                }
-            });
+            addUserScopedPaths(paths, route, EXACT.get(route.serviceName()));
+            addUserScopedPaths(paths, route, PREFIX.get(route.serviceName()));
         }
         return Set.copyOf(paths);
+    }
+
+    private static void addUserScopedPaths(
+            Set<String> paths, MicroserviceRoute route, Map<String, Policy> declared) {
+        if (declared == null) {
+            return;
+        }
+        declared.forEach((backendPath, policy) -> {
+            if (policy.access() == Access.USER_SCOPED) {
+                paths.add(route.prefix() + backendPath);
+            }
+        });
     }
 
     /**

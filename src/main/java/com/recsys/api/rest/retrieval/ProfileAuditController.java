@@ -35,7 +35,10 @@ public class ProfileAuditController {
     }
 
     @GetMapping("/api/v1/retrieval/profile-audit")
-    public ResponseEntity<?> audit(@RequestParam(required = false) Integer limit) {
+    // Named explicitly: implicit @RequestParam/@PathVariable binding needs the compiler's
+    // -parameters flag, which maven-compiler-plugin's incremental recompile silently drops —
+    // a non-clean `mvn test` then 400s these with IllegalArgumentException.
+    public ResponseEntity<?> audit(@RequestParam(value = "limit", required = false) Integer limit) {
         try {
             return ResponseEntity.ok(auditService.audit(limit));
         } catch (IllegalArgumentException e) {
@@ -51,7 +54,7 @@ public class ProfileAuditController {
 
     @GetMapping("/api/v1/retrieval/profile-audit/{user}")
     public ResponseEntity<?> auditAccount(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
     ) {
         try {
             return ResponseEntity.ok(auditService.auditAccount(user));

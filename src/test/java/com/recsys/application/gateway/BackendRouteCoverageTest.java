@@ -201,6 +201,22 @@ class BackendRouteCoverageTest {
                         + "user-scope check, so this is an off switch for 20_AuthN_AuthZ §10.");
     }
 
+    /**
+     * {@code userScopedGatewayPaths} used to walk only {@code EXACT}, so the three retrieval
+     * paths declared {@code userScoped(UserIdSource.PATH)} in {@code PREFIX} — a path template is
+     * not a path, so they cannot be declared exactly — were invisible to the guard this test
+     * exercises. This pins that the derivation now sees them too.
+     */
+    @Test
+    void userScopedGatewayPathsIncludesPrefixDeclaredRoutes() {
+        Set<String> userScoped = BackendRoutePolicy.userScopedGatewayPaths(MicroserviceRoute.defaults());
+        assertTrue(userScoped.containsAll(Set.of(
+                        "/api/retrieval/api/v1/retrieval/recommend",
+                        "/api/retrieval/api/v1/retrieval/predict",
+                        "/api/retrieval/api/v1/retrieval/users")),
+                "derived set is missing a PREFIX-declared user-scoped retrieval path: " + userScoped);
+    }
+
     // ---- the scanners only guarantee anything if nothing registers routes elsewhere ---------
 
     private static final String SPRING_SCAN_ROOT = "src/main/java/com/recsys/api/rest";

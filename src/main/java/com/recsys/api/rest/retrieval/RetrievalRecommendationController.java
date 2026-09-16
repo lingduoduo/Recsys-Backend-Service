@@ -73,7 +73,10 @@ public class RetrievalRecommendationController {
 
     @GetMapping("/embedding/{item}")
     public Map<String, Object> embedding(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
+        // Named explicitly: implicit @PathVariable/@RequestParam binding needs the compiler's
+        // -parameters flag, which maven-compiler-plugin's incremental recompile silently drops —
+        // a non-clean `mvn test` then 400s every one of these with IllegalArgumentException.
+        @PathVariable("item") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -113,8 +116,8 @@ public class RetrievalRecommendationController {
 
     @GetMapping("/recommend/{user}")
     public Map<String, Object> recommend(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
-        @RequestParam(defaultValue = DEFAULT_LIMIT) int limit
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
+        @RequestParam(value = "limit", defaultValue = DEFAULT_LIMIT) int limit
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -140,8 +143,8 @@ public class RetrievalRecommendationController {
 
     @GetMapping("/predict/{user}/{item}")
     public Map<String, Object> predict(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
+        @PathVariable("item") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -167,8 +170,8 @@ public class RetrievalRecommendationController {
 
     @GetMapping("/predict/id")
     public Map<String, Object> predictById(
-        @RequestParam @Min(0) long userId,
-        @RequestParam @Min(0) long itemId
+        @RequestParam("userId") @Min(0) long userId,
+        @RequestParam("itemId") @Min(0) long itemId
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -192,7 +195,7 @@ public class RetrievalRecommendationController {
 
     @GetMapping("/users/{user}/profile")
     public ResponseEntity<UserBehaviorProfile> profile(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
     ) {
         long started = System.nanoTime();
         boolean error = true;

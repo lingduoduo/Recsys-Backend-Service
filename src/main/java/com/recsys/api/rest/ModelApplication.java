@@ -22,7 +22,9 @@ import org.springframework.context.annotation.Import;
                 "com.recsys.health", "com.recsys.application", "com.recsys.retrieval"},
         // RetrievalRedisConfig builds StringRedisTemplate from recsys.redis so the
         // REDIS_ALLOW_NO_AUTH guard covers it. Autoconfiguration would build a second,
-        // unguarded pool from spring.data.redis.*. RedisAutoConfigurationExclusionTest pins this.
+        // unguarded pool from spring.data.redis.*. RedisAutoConfigurationExclusionTest asserts
+        // directly (by reflecting on this annotation) that both classes below stay excluded, and
+        // separately asserts the assembled context has exactly one RedisConnectionFactory bean.
         // RedisRepositoriesAutoConfiguration is excluded alongside it: nothing in this codebase
         // declares a @RedisHash entity or a Redis repository, but the registrar activates
         // unconditionally once spring-data-redis is on the classpath and then fails fast looking

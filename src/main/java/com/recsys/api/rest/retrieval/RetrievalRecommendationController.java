@@ -46,7 +46,7 @@ public class RetrievalRecommendationController {
     private static final String DEFAULT_LIMIT = "6";
     private static final int MAX_LIMIT = 50;
 
-    @Value("${recsys.embeddings.item-prefix:i2vEmb}")
+    @Value("${recsys.retrieval.embeddings.item-prefix:i2vEmb}")
     private String itemEmbeddingPrefix;
 
     private final StringRedisTemplate redis;

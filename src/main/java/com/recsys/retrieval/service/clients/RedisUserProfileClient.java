@@ -30,7 +30,7 @@ public class RedisUserProfileClient implements UserProfileClient {
         StringRedisTemplate redis,
         ObjectMapper objectMapper,
         MeterRegistry meterRegistry,
-        @Value("${recsys.user-profile.key-prefix:user-profile:v1}") String keyPrefix
+        @Value("${recsys.retrieval.user-profile.key-prefix:user-profile:v1}") String keyPrefix
     ) {
         this.redis = redis;
         this.objectMapper = objectMapper;

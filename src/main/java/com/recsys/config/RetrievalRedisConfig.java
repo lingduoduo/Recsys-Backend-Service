@@ -39,11 +39,13 @@ import java.util.stream.Collectors;
  * {@code @Configuration} class from the scan) would, silently, with no compile error to catch it.
  * The explicit exclusion removes that dependency on bean-presence entirely: with it in place,
  * {@code spring.data.redis.*} cannot produce a connection factory here no matter what this class
- * does or stops doing. {@link com.recsys.config.RedisAutoConfigurationExclusionTest} pins this by
- * asserting the connection factory Spring injects reports the {@code recsys.redis} host, not one
- * from {@code spring.data.redis.*} — a regression check that was verified to actually fail (by
- * temporarily removing the exclusion and the connection-factory bean together) before being
- * committed; see the Task 9 report for what was observed.
+ * does or stops doing. {@link com.recsys.config.RedisAutoConfigurationExclusionTest} pins this
+ * three ways: directly, by reflecting on {@code ModelApplication}'s {@code exclude = ...} to
+ * assert both autoconfigurations stay named there; behaviourally, by asserting the context has
+ * exactly one {@code RedisConnectionFactory} bean; and by asserting the connection factory Spring
+ * injects reports the {@code recsys.redis} host, not one from {@code spring.data.redis.*}. Each
+ * check was verified by hand to actually fail under the regression it guards before being
+ * committed; see the Task 9 fix-round-1 report for what was observed.
  *
  * <p>Consequence worth knowing: {@code spring.data.redis.*} is inert in this application. Tests
  * that point at an ephemeral Redis must set {@code recsys.redis.host} / {@code recsys.redis.port}.

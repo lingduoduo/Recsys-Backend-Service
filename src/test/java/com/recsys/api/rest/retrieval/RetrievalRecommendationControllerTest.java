@@ -1,4 +1,4 @@
-package com.recsys.retrieval.controller;
+package com.recsys.api.rest.retrieval;
 
 import com.recsys.retrieval.model.FeedbackRequest;
 import com.recsys.retrieval.measurement.MeasurementSnapshot;

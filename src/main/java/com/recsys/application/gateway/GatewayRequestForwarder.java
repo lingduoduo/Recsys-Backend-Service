@@ -54,6 +54,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
     private final Map<String, RouteCircuitBreaker> circuitBreakers;
     private final GatewayRateLimiter rateLimiter;
     private final Counter userScopeRejected;   // null when no registry was supplied
+    private final GatewayCircuitMetrics circuitMetrics;   // null when no registry was supplied
     private final AtomicBoolean userScopeWarned = new AtomicBoolean();
     private final AdminTokenGuard operatorGuard;   // null means not configured, so nobody passes
 
@@ -120,6 +121,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
         this.staticUpstreams = UpstreamEndpointGroups.create(routes, timeout, retryDecorator(), healthConfig);
         this.registryUpstreams = null;
         this.userScopeRejected = counter(registry);
+        this.circuitMetrics = GatewayCircuitMetrics.create(registry);
         this.operatorGuard = operatorGuard;
     }
 
@@ -135,6 +137,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
         this.staticUpstreams = null;
         this.registryUpstreams = registryUpstreams;
         this.userScopeRejected = counter(registry);
+        this.circuitMetrics = GatewayCircuitMetrics.create(registry);
         this.operatorGuard = operatorGuard;
     }
 
@@ -336,7 +339,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
         RequestHeaders upstreamHeaders = buildUpstreamHeaders(request.headers(), targetPath, ctx, principal);
         HttpRequest upstreamReq = HttpRequest.of(upstreamHeaders, request.content());
         HttpResponse upstream = client.execute(upstreamReq);
-        return GatewayUpstreamResponse.relay(upstream, cb, permit, route.name());
+        return GatewayUpstreamResponse.relay(upstream, cb, permit, route.name(), circuitMetrics);
     }
 
     static RequestHeaders buildUpstreamHeaders(RequestHeaders incoming, String targetPath,

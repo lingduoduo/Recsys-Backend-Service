@@ -29,7 +29,7 @@ class GatewayUpstreamResponseTest {
                 ResponseHeaders.builder(HttpStatus.OK).add("x-upstream", "yes").build(),
                 HttpData.ofUtf8("body"), HttpHeaders.of("x-checksum", "done"));
         AggregatedHttpResponse result = GatewayUpstreamResponse.relay(upstream, cb,
-                cb.tryAcquirePermit(), "catalog").aggregate().get(3, TimeUnit.SECONDS);
+                cb.tryAcquirePermit(), "catalog", null).aggregate().get(3, TimeUnit.SECONDS);
         assertEquals("yes", result.headers().get("x-upstream"));
         assertEquals("body", result.contentUtf8());
         assertEquals("done", result.trailers().get("x-checksum"));
@@ -40,7 +40,7 @@ class GatewayUpstreamResponseTest {
     void passes5xxThroughAndCountsExactlyOneFailure() throws Exception {
         RouteCircuitBreaker cb = new RouteCircuitBreaker(2, 60000);
         AggregatedHttpResponse result = GatewayUpstreamResponse.relay(
-                HttpResponse.of(HttpStatus.INTERNAL_SERVER_ERROR), cb, cb.tryAcquirePermit(), "catalog")
+                HttpResponse.of(HttpStatus.INTERNAL_SERVER_ERROR), cb, cb.tryAcquirePermit(), "catalog", null)
                 .aggregate().get(3, TimeUnit.SECONDS);
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, result.status());
         assertEquals(RouteCircuitBreaker.State.CLOSED, cb.state());
@@ -52,7 +52,7 @@ class GatewayUpstreamResponseTest {
     void mapsFailureBeforeHeadersTo502WithoutDoubleCounting() throws Exception {
         RouteCircuitBreaker cb = new RouteCircuitBreaker(2, 60000);
         AggregatedHttpResponse result = GatewayUpstreamResponse.relay(
-                HttpResponse.ofFailure(new IOException("unreachable")), cb, cb.tryAcquirePermit(), "catalog")
+                HttpResponse.ofFailure(new IOException("unreachable")), cb, cb.tryAcquirePermit(), "catalog", null)
                 .aggregate().get(3, TimeUnit.SECONDS);
         assertEquals(HttpStatus.BAD_GATEWAY, result.status());
         assertEquals("no-store", result.headers().get(HttpHeaderNames.CACHE_CONTROL));
@@ -64,7 +64,7 @@ class GatewayUpstreamResponseTest {
     @Test
     void mapsNestedNoHealthyEndpointTo503() throws Exception {
         AggregatedHttpResponse result = GatewayUpstreamResponse.relay(HttpResponse.ofFailure(
-                new IllegalStateException(EmptyEndpointGroupException.get())), null, null, "catalog")
+                new IllegalStateException(EmptyEndpointGroupException.get())), null, null, "catalog", null)
                 .aggregate().get(3, TimeUnit.SECONDS);
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, result.status());
         assertTrue(result.contentUtf8().contains("no healthy endpoint"));
@@ -74,7 +74,7 @@ class GatewayUpstreamResponseTest {
     void doesNotSettleSuccessOnHeadersAndDoesNotReplacePartialResponse() throws Exception {
         RouteCircuitBreaker cb = probeBreaker();
         HttpResponseWriter writer = HttpResponse.streaming();
-        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog");
+        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog", null);
         CompletableFuture<String> first = new CompletableFuture<>();
         CompletableFuture<Throwable> error = new CompletableFuture<>();
         relay.subscribe(new Subscriber<HttpObject>() {
@@ -99,7 +99,7 @@ class GatewayUpstreamResponseTest {
     void abortBeforeSubscriptionReleasesProbe() throws Exception {
         RouteCircuitBreaker cb = probeBreaker();
         HttpResponseWriter writer = HttpResponse.streaming();
-        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog");
+        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog", null);
         relay.abort();
         assertThrows(java.util.concurrent.ExecutionException.class,
                 () -> writer.whenComplete().get(3, TimeUnit.SECONDS));
@@ -110,7 +110,7 @@ class GatewayUpstreamResponseTest {
     @Test
     void respectsDemandAndCancelsWithPendingData() throws Exception {
         HttpResponseWriter writer = HttpResponse.streaming();
-        HttpResponse relay = GatewayUpstreamResponse.relay(writer, null, null, "catalog");
+        HttpResponse relay = GatewayUpstreamResponse.relay(writer, null, null, "catalog", null);
         var objects = new java.util.concurrent.LinkedBlockingQueue<HttpObject>();
         CompletableFuture<Subscription> subscription = new CompletableFuture<>();
         relay.subscribe(new Subscriber<HttpObject>() {
@@ -141,7 +141,7 @@ class GatewayUpstreamResponseTest {
     void cancellationReachesUpstreamAndReleasesProbe() throws Exception {
         RouteCircuitBreaker cb = probeBreaker();
         HttpResponseWriter writer = HttpResponse.streaming();
-        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog");
+        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog", null);
         CompletableFuture<Subscription> subscription = new CompletableFuture<>();
         relay.subscribe(new Subscriber<HttpObject>() {
             public void onSubscribe(Subscription s) { subscription.complete(s); }
@@ -168,7 +168,7 @@ class GatewayUpstreamResponseTest {
             HttpResponseWriter writer = HttpResponse.streaming();
             RouteCircuitBreaker.Permit permit = cb.tryAcquirePermit();
             assertNotNull(permit, "breaker stayed closed through cancel #" + attempt);
-            HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, permit, "catalog");
+            HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, permit, "catalog", null);
             CompletableFuture<Subscription> subscription = new CompletableFuture<>();
             CompletableFuture<String> chunk = new CompletableFuture<>();
             relay.subscribe(new Subscriber<HttpObject>() {
@@ -195,7 +195,7 @@ class GatewayUpstreamResponseTest {
     void releasedProbeNeitherClosesTheBreakerNorLeaksItsSlot() throws Exception {
         RouteCircuitBreaker cb = probeBreaker();
         HttpResponseWriter writer = HttpResponse.streaming();
-        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog");
+        HttpResponse relay = GatewayUpstreamResponse.relay(writer, cb, cb.tryAcquirePermit(), "catalog", null);
         CompletableFuture<Subscription> subscription = new CompletableFuture<>();
         relay.subscribe(new Subscriber<HttpObject>() {
             public void onSubscribe(Subscription s) { subscription.complete(s); }
@@ -228,7 +228,7 @@ class GatewayUpstreamResponseTest {
             RouteCircuitBreaker cb = probeBreaker();
             HttpResponse response = WebClient.of("http://127.0.0.1:" + upstream.activeLocalPort())
                     .get("/item");
-            HttpResponse relay = GatewayUpstreamResponse.relay(response, cb, cb.tryAcquirePermit(), "catalog");
+            HttpResponse relay = GatewayUpstreamResponse.relay(response, cb, cb.tryAcquirePermit(), "catalog", null);
             CompletableFuture<Integer> bytes = new CompletableFuture<>();
             java.util.concurrent.atomic.AtomicInteger seen = new java.util.concurrent.atomic.AtomicInteger();
             java.util.concurrent.atomic.AtomicBoolean pooled = new java.util.concurrent.atomic.AtomicBoolean();

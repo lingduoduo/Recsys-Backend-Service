@@ -1,6 +1,6 @@
 package com.recsys.retrieval.config;
 
-import com.recsys.retrieval.RetrievalServiceApplication;
+import com.recsys.api.rest.ModelApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.WebApplicationType;
@@ -10,7 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@SpringBootTest(classes = RetrievalServiceApplication.class)
+@SpringBootTest(classes = ModelApplication.class)
 class ProfileAuditPropertiesTest {
 
     @Autowired
@@ -23,15 +23,15 @@ class ProfileAuditPropertiesTest {
 
     @Test
     void rejectsNonPositiveChunkSize() {
-        assertThrows(Exception.class, () -> new SpringApplicationBuilder(RetrievalServiceApplication.class)
+        assertThrows(Exception.class, () -> new SpringApplicationBuilder(ModelApplication.class)
             .web(WebApplicationType.NONE)
-            .run("--recsys.profile-audit.chunk-size=0"));
+            .run("--recsys.retrieval.profile-audit.chunk-size=0"));
     }
 
     @Test
     void rejectsNegativeSampleItems() {
-        assertThrows(Exception.class, () -> new SpringApplicationBuilder(RetrievalServiceApplication.class)
+        assertThrows(Exception.class, () -> new SpringApplicationBuilder(ModelApplication.class)
             .web(WebApplicationType.NONE)
-            .run("--recsys.profile-audit.sample-items=-1"));
+            .run("--recsys.retrieval.profile-audit.sample-items=-1"));
     }
 }

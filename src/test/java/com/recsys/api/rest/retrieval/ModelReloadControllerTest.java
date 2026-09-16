@@ -1,5 +1,7 @@
 package com.recsys.api.rest.retrieval;
 
+import com.recsys.application.auth.LoginTokenService;
+import com.recsys.config.RequestScopeData;
 import com.recsys.retrieval.service.DeepLearningPredictionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,12 @@ class ModelReloadControllerTest {
 
     @MockBean
     DeepLearningPredictionService predictionService;
+
+    @MockBean
+    LoginTokenService loginTokenService;
+
+    @MockBean
+    RequestScopeData requestScopeData;
 
     @Test
     void reloadReturnsOk() throws Exception {

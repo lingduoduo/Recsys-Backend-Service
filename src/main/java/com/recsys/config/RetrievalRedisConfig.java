@@ -28,13 +28,22 @@ import java.util.stream.Collectors;
  * bypassable on 8080 simply by merging this code. The factory is built here instead, from the
  * same properties and behind the same guard as the raw-Lettuce executors in {@link RedisConfig}.
  *
- * <p>Today what keeps Boot's {@code RedisAutoConfiguration} from also running — and opening that
- * second, unguarded pool — is {@code @ConditionalOnMissingBean}: because this class already
- * registers a {@code LettuceConnectionFactory} and a {@code StringRedisTemplate}, Boot's
- * autoconfiguration backs off. That is weaker than an explicit
- * {@code spring.autoconfigure.exclude}: renaming or removing either bean here silently
- * re-enables the {@code spring.data.redis.*} path, with no compile error to catch it. An explicit
- * exclusion on {@code ModelApplication} is a follow-up, not yet in place.
+ * <p>{@code ModelApplication} excludes Boot's {@code RedisAutoConfiguration} (and
+ * {@code RedisRepositoriesAutoConfiguration}, which activates unconditionally once
+ * spring-data-redis is on the classpath and otherwise fails looking for a bean literally named
+ * {@code redisTemplate}) outright via {@code @SpringBootApplication(exclude = ...)}, rather than
+ * relying only on {@code @ConditionalOnMissingBean} back-off. The distinction matters:
+ * {@code @ConditionalOnMissingBean(RedisConnectionFactory.class)} on Boot's own connection-factory
+ * bean backs off as long as {@link #retrievalRedisConnectionFactory} exists under any name, so
+ * renaming it alone would not reopen the gap — but <em>removing</em> it (or removing this whole
+ * {@code @Configuration} class from the scan) would, silently, with no compile error to catch it.
+ * The explicit exclusion removes that dependency on bean-presence entirely: with it in place,
+ * {@code spring.data.redis.*} cannot produce a connection factory here no matter what this class
+ * does or stops doing. {@link com.recsys.config.RedisAutoConfigurationExclusionTest} pins this by
+ * asserting the connection factory Spring injects reports the {@code recsys.redis} host, not one
+ * from {@code spring.data.redis.*} — a regression check that was verified to actually fail (by
+ * temporarily removing the exclusion and the connection-factory bean together) before being
+ * committed; see the Task 9 report for what was observed.
  *
  * <p>Consequence worth knowing: {@code spring.data.redis.*} is inert in this application. Tests
  * that point at an ephemeral Redis must set {@code recsys.redis.host} / {@code recsys.redis.port}.

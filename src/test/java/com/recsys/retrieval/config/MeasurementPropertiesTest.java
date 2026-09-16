@@ -1,6 +1,6 @@
 package com.recsys.retrieval.config;
 
-import com.recsys.retrieval.RetrievalServiceApplication;
+import com.recsys.api.rest.ModelApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,7 +9,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@SpringBootTest(classes = RetrievalServiceApplication.class)
+@SpringBootTest(classes = ModelApplication.class)
 class MeasurementPropertiesTest {
 
     @Autowired

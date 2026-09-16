@@ -1,5 +1,7 @@
 package com.recsys.api.rest.retrieval;
 
+import com.recsys.application.auth.LoginTokenService;
+import com.recsys.config.RequestScopeData;
 import com.recsys.retrieval.model.FeedbackRequest;
 import com.recsys.retrieval.measurement.MeasurementSnapshot;
 import com.recsys.retrieval.measurement.RecommendationMeasurementService;
@@ -26,7 +28,6 @@ import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -56,6 +57,12 @@ class RetrievalRecommendationControllerTest {
 
     @MockBean
     private UserProfileClient userProfileClient;
+
+    @MockBean
+    private LoginTokenService loginTokenService;
+
+    @MockBean
+    private RequestScopeData requestScopeData;
 
     // --- /users/{user}/profile ---
 
@@ -355,31 +362,42 @@ class RetrievalRecommendationControllerTest {
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(false), eq(false));
     }
 
+    // The service failures below used to escape MockMvc as thrown exceptions, because the
+    // isolated retrieval app had no @ControllerAdvice in scope. Now that this controller is
+    // assembled into ModelApplication, GlobalExceptionHandler's catch-all is in scope for every
+    // @WebMvcTest slice too (Spring Boot auto-detects @ControllerAdvice for the slice regardless
+    // of an explicit @Import), so the same failures are resolved to a 500 instead of propagating.
+    // The measurement recording under test happens in the controller's own finally block before
+    // the exception ever reaches that advice, so the assertion on it is unaffected.
+
     @Test
-    void recommendEndpointRecordsTimeoutAsAnErrorAndTimeout() {
+    void recommendEndpointRecordsTimeoutAsAnErrorAndTimeout() throws Exception {
         when(recommendationService.recommend("u1", 6)).thenThrow(new IllegalStateException(new TimeoutException()));
 
-        assertThrows(Exception.class, () -> mockMvc.perform(get("/recommend/u1")));
+        mockMvc.perform(get("/recommend/u1"))
+            .andExpect(status().isInternalServerError());
 
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(true), eq(true));
     }
 
     @Test
-    void recommendEndpointRecordsNonTimeoutServiceErrorWithoutTimeoutFlag() {
+    void recommendEndpointRecordsNonTimeoutServiceErrorWithoutTimeoutFlag() throws Exception {
         when(recommendationService.recommend("u1", 6)).thenThrow(new IllegalStateException("service failed"));
 
-        assertThrows(Exception.class, () -> mockMvc.perform(get("/recommend/u1")));
+        mockMvc.perform(get("/recommend/u1"))
+            .andExpect(status().isInternalServerError());
 
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(true), eq(false));
     }
 
     @Test
-    void feedbackEndpointRecordsTimeoutAsAnErrorAndTimeout() {
+    void feedbackEndpointRecordsTimeoutAsAnErrorAndTimeout() throws Exception {
         when(recommendationService.recordFeedback(any())).thenThrow(new IllegalStateException(new TimeoutException()));
 
-        assertThrows(Exception.class, () -> mockMvc.perform(post("/feedback")
+        mockMvc.perform(post("/feedback")
             .contentType("application/json")
-            .content("{\"user\":\"u1\",\"item\":\"item1\",\"clicked\":true,\"reward\":1.0}")));
+            .content("{\"user\":\"u1\",\"item\":\"item1\",\"clicked\":true,\"reward\":1.0}"))
+            .andExpect(status().isInternalServerError());
 
         verify(measurementService).recordRequest(eq("feedback"), any(Duration.class), eq(true), eq(true));
     }

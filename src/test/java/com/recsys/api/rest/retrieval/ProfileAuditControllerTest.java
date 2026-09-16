@@ -1,5 +1,7 @@
 package com.recsys.api.rest.retrieval;
 
+import com.recsys.application.auth.LoginTokenService;
+import com.recsys.config.RequestScopeData;
 import com.recsys.retrieval.service.audit.AccountAuditReport;
 import com.recsys.retrieval.service.audit.ProfileAuditReport;
 import com.recsys.retrieval.service.audit.ProfileAuditReport.Finding;
@@ -32,6 +34,12 @@ class ProfileAuditControllerTest {
 
     @MockBean
     ProfileAuditService auditService;
+
+    @MockBean
+    LoginTokenService loginTokenService;
+
+    @MockBean
+    RequestScopeData requestScopeData;
 
     private static ProfileAuditReport report() {
         return new ProfileAuditReport("ok", "run-7", "2026-09-07T10:00:00Z", 812L, false,

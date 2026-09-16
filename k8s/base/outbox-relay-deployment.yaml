@@ -58,8 +58,11 @@ spec:
               value: com.recsys.application.outbox.OutboxRelayCommand
             - name: OUTBOX_RELAY_PORT
               value: "7020"
+            # -XX:+ExitOnOutOfMemoryError: an OOM'd JVM keeps serving (500s, then 200s once GC
+            # recovers) with no liveness probe that notices, so nothing restarts it. Exiting
+            # skips the graceful drain deliberately — see 18_Fault_Tolerance.md §9.5.
             - name: JAVA_OPTS
-              value: "-Xms256m -Xmx512m"
+              value: "-Xms256m -Xmx512m -XX:+ExitOnOutOfMemoryError"
           ports:
             - name: http
               containerPort: 7020

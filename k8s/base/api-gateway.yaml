@@ -45,8 +45,11 @@ spec:
               value: com.recsys.api.gateway.MicroserviceGatewayServer
             - name: GATEWAY_PORT
               value: "8010"
+            # -XX:+ExitOnOutOfMemoryError: an OOM'd JVM keeps serving (500s, then 200s once GC
+            # recovers) with no liveness probe that notices, so nothing restarts it. Exiting
+            # skips the graceful drain deliberately — see 18_Fault_Tolerance.md §9.5.
             - name: JAVA_OPTS
-              value: "-Xms256m -Xmx512m"
+              value: "-Xms256m -Xmx512m -XX:+ExitOnOutOfMemoryError"
             # Origin lockdown. Absent until the CDN rollout reaches step 4, at which point the
             # Secret is created out-of-band (docs/runbooks/cdn-operations.md). optional: true keeps
             # the pod schedulable before then and in local/base deploys with no CDN.

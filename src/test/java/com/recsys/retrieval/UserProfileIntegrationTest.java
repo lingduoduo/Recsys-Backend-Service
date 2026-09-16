@@ -51,14 +51,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Boot parent, not from our pom.
  */
 @SpringBootTest(properties = {
-    "recsys.catalog.a-sci-fi.title=Shared Fixture Sci-Fi",
-    "recsys.catalog.a-sci-fi.genres[0]=sci-fi",
-    "recsys.catalog.a-sci-fi.tags[0]=space",
-    "recsys.catalog.a-sci-fi.new-release=false",
-    "recsys.catalog.z-drama.title=Baseline Drama",
-    "recsys.catalog.z-drama.genres[0]=drama",
-    "recsys.catalog.z-drama.tags[0]=character",
-    "recsys.catalog.z-drama.new-release=false",
+    "recsys.retrieval.catalog.a-sci-fi.title=Shared Fixture Sci-Fi",
+    "recsys.retrieval.catalog.a-sci-fi.genres[0]=sci-fi",
+    "recsys.retrieval.catalog.a-sci-fi.tags[0]=space",
+    "recsys.retrieval.catalog.a-sci-fi.new-release=false",
+    "recsys.retrieval.catalog.z-drama.title=Baseline Drama",
+    "recsys.retrieval.catalog.z-drama.genres[0]=drama",
+    "recsys.retrieval.catalog.z-drama.tags[0]=character",
+    "recsys.retrieval.catalog.z-drama.new-release=false",
     "spring.data.redis.port=1"
 })
 @AutoConfigureMockMvc

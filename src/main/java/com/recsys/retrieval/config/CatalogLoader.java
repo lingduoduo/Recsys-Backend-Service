@@ -14,8 +14,8 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * Loads an optional external catalog JSON ({@code recsys.catalog-path}) and merges it on top of
- * the inline {@code recsys.catalog} at startup. Lets the item catalog outgrow application.yml and
+ * Loads an optional external catalog JSON ({@code recsys.retrieval.catalog-path}) and merges it on top of
+ * the inline {@code recsys.retrieval.catalog} at startup. Lets the item catalog outgrow application.yml and
  * stay in sync with the Python pipeline's catalog without a code change. No-op when the path is
  * unset; a missing file is logged and skipped (the inline catalog still serves).
  */
@@ -39,7 +39,7 @@ public class CatalogLoader {
         }
         Path path = Path.of(catalogPath);
         if (!Files.isRegularFile(path)) {
-            log.warn("recsys.catalog-path={} does not exist; keeping inline catalog ({} items)",
+            log.warn("recsys.retrieval.catalog-path={} does not exist; keeping inline catalog ({} items)",
                 catalogPath, properties.getCatalog().size());
             return;
         }

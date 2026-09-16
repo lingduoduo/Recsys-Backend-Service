@@ -18,7 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-@ConfigurationProperties(prefix = "recsys")
+@ConfigurationProperties(prefix = "recsys.retrieval")
 @Validated
 public class RecommendationProperties {
     private Cache cache = new Cache();

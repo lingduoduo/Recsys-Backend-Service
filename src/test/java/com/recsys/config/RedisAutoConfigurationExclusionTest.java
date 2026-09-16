@@ -19,11 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>{@code recsys.redis.host} and {@code spring.data.redis.host} are set here to two different,
  * distinctive values. Only {@code RetrievalRedisConfig}'s factory reads {@code recsys.redis.*}, so
  * asserting the injected factory's standalone host equals the {@code recsys.redis} value fails
- * loudly the moment autoconfiguration wins instead — whether because the exclusion is removed, or
- * because {@code RetrievalRedisConfig} stops defining the beans that make Boot back off in the
- * exclusion's absence. Both regressions were exercised by hand (exclusion removed +
- * {@code stringRedisTemplate} renamed) while writing this test, and it failed as expected before
- * being reverted; see the Task 9 report for what was observed.
+ * loudly the moment autoconfiguration wins instead. Verified by hand while writing this test:
+ * removing the exclusion alone did NOT fail it (Boot's own connection-factory bean is separately
+ * guarded by {@code @ConditionalOnMissingBean(RedisConnectionFactory.class)}, which still saw
+ * {@link RetrievalRedisConfig}'s factory and backed off); removing the exclusion together with
+ * {@link RetrievalRedisConfig}'s {@code retrievalRedisConnectionFactory} bean did fail it, with
+ * the assertion reporting the autoconfigured canary host. Both files were restored after. See the
+ * Task 9 report for the full transcript.
  */
 @SpringBootTest(classes = ModelApplication.class, properties = {
         "recsys.redis.host=recsys-redis-canary-host",

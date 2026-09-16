@@ -25,9 +25,16 @@ import java.util.stream.Collectors;
  * Spring Boot autoconfigure that template would create a second connection pool configured by
  * {@code spring.data.redis.*}, independent of {@code recsys.redis} and — the point — invisible to
  * {@link LettuceClientFactory}'s credential guard. An existing security control would become
- * bypassable on 8080 simply by merging this code. So {@code RedisAutoConfiguration} is excluded
- * on {@code ModelApplication} and the factory is built here, from the same properties and behind
- * the same guard as the raw-Lettuce executors in {@link RedisConfig}.
+ * bypassable on 8080 simply by merging this code. The factory is built here instead, from the
+ * same properties and behind the same guard as the raw-Lettuce executors in {@link RedisConfig}.
+ *
+ * <p>Today what keeps Boot's {@code RedisAutoConfiguration} from also running — and opening that
+ * second, unguarded pool — is {@code @ConditionalOnMissingBean}: because this class already
+ * registers a {@code LettuceConnectionFactory} and a {@code StringRedisTemplate}, Boot's
+ * autoconfiguration backs off. That is weaker than an explicit
+ * {@code spring.autoconfigure.exclude}: renaming or removing either bean here silently
+ * re-enables the {@code spring.data.redis.*} path, with no compile error to catch it. An explicit
+ * exclusion on {@code ModelApplication} is a follow-up, not yet in place.
  *
  * <p>Consequence worth knowing: {@code spring.data.redis.*} is inert in this application. Tests
  * that point at an ephemeral Redis must set {@code recsys.redis.host} / {@code recsys.redis.port}.
@@ -49,6 +56,7 @@ public class RetrievalRedisConfig {
             Set<String> nodes = Arrays.stream(props.getSentinelNodes().split(","))
                 .map(String::strip)
                 .filter(node -> !node.isEmpty())
+                .map(RetrievalRedisConfig::withDefaultSentinelPort)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
             RedisSentinelConfiguration sentinel =
                 new RedisSentinelConfiguration(props.getSentinelMaster(), nodes);
@@ -60,6 +68,18 @@ public class RetrievalRedisConfig {
             new RedisStandaloneConfiguration(props.getHost(), props.getPort());
         applyCredentials(standalone, props);
         return new LettuceConnectionFactory(standalone, client.build());
+    }
+
+    /**
+     * Mirrors {@code LettuceClientFactory.sentinelUri}'s handling of a colon-less sentinel node:
+     * that path silently defaults such an entry to port 26379, but
+     * {@code RedisSentinelConfiguration} (via {@code RedisNode.fromString}) throws on the same
+     * input. Without this, one {@code recsys.redis.sentinel-nodes} value would behave two
+     * different ways inside the same JVM — the raw-Lettuce path guessing, this path failing
+     * Spring context startup.
+     */
+    private static String withDefaultSentinelPort(String node) {
+        return node.lastIndexOf(':') > 0 ? node : node + ":26379";
     }
 
     private static void applyCredentials(WithPassword config, RedisProperties props) {

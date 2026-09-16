@@ -1,10 +1,13 @@
 package com.recsys.config;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.RedisNode;
+import org.springframework.data.redis.connection.RedisSentinelConfiguration;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -59,5 +62,32 @@ class RetrievalRedisConfigTest {
 
         assertThat(factory.getSentinelConfiguration()).isNotNull();
         assertThat(factory.getSentinelConfiguration().getMaster().getName()).isEqualTo("mymaster");
+    }
+
+    /**
+     * LettuceClientFactory.sentinelUri defaults a colon-less sentinel node to port 26379.
+     * RedisSentinelConfiguration (via RedisNode.fromString) throws IllegalArgumentException on a
+     * bare hostname with no port. This pins that the bridge normalizes nodes the same way the
+     * raw-Lettuce path does, so recsys.redis.sentinel-nodes means the same thing on both stacks.
+     * Also exercises the whitespace-padding and trailing-comma handling the split/strip/filter
+     * chain already claims to provide.
+     */
+    @Test
+    void sentinelNodeWithoutAPortDefaultsToTheStandardSentinelPortLikeTheRawLettucePath() {
+        RedisProperties props = standalone();
+        props.setMode("sentinel");
+        props.setSentinelMaster("mymaster");
+        props.setSentinelNodes(" sentinel-a:26380 , sentinel-b , ");
+
+        LettuceConnectionFactory factory = RetrievalRedisConfig.connectionFactory(props, Map.of());
+
+        RedisSentinelConfiguration sentinel = factory.getSentinelConfiguration();
+        assertThat(sentinel).isNotNull();
+        Set<RedisNode> sentinels = sentinel.getSentinels();
+        assertThat(sentinels)
+            .extracting(RedisNode::getHost, RedisNode::getPort)
+            .containsExactlyInAnyOrder(
+                org.assertj.core.groups.Tuple.tuple("sentinel-a", 26380),
+                org.assertj.core.groups.Tuple.tuple("sentinel-b", 26379));
     }
 }

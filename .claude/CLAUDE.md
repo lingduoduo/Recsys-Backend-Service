@@ -223,7 +223,7 @@ sub-packages.
 | `config/` | Spring config + `@ConfigurationProperties`, `EnvConfig`/`EnvVars`, `NeedLogin` |
 | `exception/` | Exception types + `GlobalExceptionHandler` (saga exceptions live in `domain/saga`) |
 
-`online/flink/` and `training/rulebased/` are **excluded from the Maven compile** (they need Spark/Flink classpaths) and are intentionally left outside the layer scheme — edit with that in mind.
+`online/flink/` and `training/embedding/` are **excluded from the Maven compile** (they need Spark/Flink classpaths) and are intentionally left outside the layer scheme — edit with that in mind.
 
 ## Redis Conventions
 

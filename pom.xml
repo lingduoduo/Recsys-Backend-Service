@@ -65,7 +65,7 @@
         <version>3.13.0</version>
         <configuration>
           <excludes>
-            <exclude>com/recsys/training/rulebased/**</exclude>
+            <exclude>com/recsys/training/embedding/**</exclude>
             <exclude>com/recsys/online/flink/**</exclude>
           </excludes>
           <!-- Mirror the main-source exclusions so flink test classes don't fail
@@ -674,7 +674,7 @@
             <artifactId>maven-compiler-plugin</artifactId>
             <version>3.13.0</version>
             <configuration>
-              <!-- Compile only the Spark offline-embedding job (training/rulebased).
+              <!-- Compile only the Spark offline-embedding job (training/embedding).
                    Keep the Flink sources excluded — this profile has no Flink deps. -->
               <excludes combine.self="override">
                 <exclude>com/recsys/online/flink/**</exclude>
@@ -754,7 +754,7 @@
             <version>3.13.0</version>
             <configuration>
               <excludes combine.self="override">
-                <exclude>com/recsys/training/rulebased/**</exclude>
+                <exclude>com/recsys/training/embedding/**</exclude>
               </excludes>
               <!-- Clear the default testExcludes so flink test classes compile. -->
               <testExcludes combine.self="override"/>

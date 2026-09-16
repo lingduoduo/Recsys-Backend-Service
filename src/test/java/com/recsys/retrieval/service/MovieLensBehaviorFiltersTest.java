@@ -1,12 +1,12 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.service.retrieval.MovieCandidate;
-import com.demo.retrieval.service.filters.CandidateFilterResult;
-import com.demo.retrieval.service.filters.PreviouslySeenMoviesBackupFilter;
-import com.demo.retrieval.service.filters.PreviouslySeenMoviesFilter;
-import com.demo.retrieval.service.filters.PreviouslyServedMoviesFilter;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.retrieval.MovieCandidate;
+import com.recsys.retrieval.service.filters.CandidateFilterResult;
+import com.recsys.retrieval.service.filters.PreviouslySeenMoviesBackupFilter;
+import com.recsys.retrieval.service.filters.PreviouslySeenMoviesFilter;
+import com.recsys.retrieval.service.filters.PreviouslyServedMoviesFilter;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

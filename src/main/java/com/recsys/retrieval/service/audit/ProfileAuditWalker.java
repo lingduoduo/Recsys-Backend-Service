@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.service.audit.ProfileAuditReport.UserRow;
-import com.demo.retrieval.service.audit.ProfileAuditStore.RawProfile;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.UserRow;
+import com.recsys.retrieval.service.audit.ProfileAuditStore.RawProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
 /**
  * Single source of truth for the scoring cutoffs that were previously scattered as magic

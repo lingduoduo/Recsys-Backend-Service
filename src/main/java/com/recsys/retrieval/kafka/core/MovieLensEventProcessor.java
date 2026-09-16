@@ -1,15 +1,15 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
-import com.demo.retrieval.kafka.config.Args;
-import com.demo.retrieval.kafka.config.KafkaConsumerConfig;
-import com.demo.retrieval.kafka.config.KafkaProducerConfig;
-import com.demo.retrieval.kafka.event.KafkaMessage;
-import com.demo.retrieval.kafka.event.MovieEvent;
-import com.demo.retrieval.kafka.event.MovieInteractionEvent;
-import com.demo.retrieval.kafka.event.MovieLensEvent;
-import com.demo.retrieval.kafka.event.RatingEvent;
-import com.demo.retrieval.kafka.event.RecSysEvent;
-import com.demo.retrieval.kafka.event.UserEvent;
+import com.recsys.retrieval.kafka.config.Args;
+import com.recsys.retrieval.kafka.config.KafkaConsumerConfig;
+import com.recsys.retrieval.kafka.config.KafkaProducerConfig;
+import com.recsys.retrieval.kafka.event.KafkaMessage;
+import com.recsys.retrieval.kafka.event.MovieEvent;
+import com.recsys.retrieval.kafka.event.MovieInteractionEvent;
+import com.recsys.retrieval.kafka.event.MovieLensEvent;
+import com.recsys.retrieval.kafka.event.RatingEvent;
+import com.recsys.retrieval.kafka.event.RecSysEvent;
+import com.recsys.retrieval.kafka.event.UserEvent;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.clients;
+package com.recsys.retrieval.service.clients;
 
 import java.util.List;
 

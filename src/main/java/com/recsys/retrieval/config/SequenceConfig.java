@@ -1,10 +1,10 @@
-package com.demo.retrieval.config;
+package com.recsys.retrieval.config;
 
-import com.demo.retrieval.service.clients.MovieLensFeatureClient;
-import com.demo.retrieval.service.query_hydrators.BehaviorSequencesQueryHydrator;
-import com.demo.retrieval.service.query_hydrators.RatingSequencesQueryHydrator;
-import com.demo.retrieval.service.sequence.RedisSequenceClient;
-import com.demo.retrieval.service.sequence.SequenceClient;
+import com.recsys.retrieval.service.clients.MovieLensFeatureClient;
+import com.recsys.retrieval.service.query_hydrators.BehaviorSequencesQueryHydrator;
+import com.recsys.retrieval.service.query_hydrators.RatingSequencesQueryHydrator;
+import com.recsys.retrieval.service.sequence.RedisSequenceClient;
+import com.recsys.retrieval.service.sequence.SequenceClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;

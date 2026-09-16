@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.grpo;
+package com.recsys.retrieval.service.grpo;
 
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

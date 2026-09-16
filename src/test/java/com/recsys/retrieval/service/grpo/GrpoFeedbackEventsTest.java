@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.grpo;
+package com.recsys.retrieval.service.grpo;
 
-import com.demo.retrieval.model.FeedbackRequest;
+import com.recsys.retrieval.model.FeedbackRequest;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

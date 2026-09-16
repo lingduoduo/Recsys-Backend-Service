@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.content;
+package com.recsys.retrieval.service.content;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.config.RecommendationProperties.MovieProfile;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties.MovieProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;

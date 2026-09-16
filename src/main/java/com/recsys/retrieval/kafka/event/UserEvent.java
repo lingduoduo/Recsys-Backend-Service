@@ -1,4 +1,4 @@
-package com.demo.retrieval.kafka.event;
+package com.recsys.retrieval.kafka.event;
 
 public record UserEvent(
         String userId,

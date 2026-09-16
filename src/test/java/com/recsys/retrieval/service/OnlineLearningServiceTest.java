@@ -1,8 +1,8 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.model.FeatureCache;
-import com.demo.retrieval.model.FeatureCache.RewardModelStats;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.model.FeatureCache;
+import com.recsys.retrieval.model.FeatureCache.RewardModelStats;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;

@@ -1,11 +1,11 @@
-package com.demo.retrieval.controller;
+package com.recsys.retrieval.controller;
 
-import com.demo.retrieval.service.audit.AccountAuditReport;
-import com.demo.retrieval.service.audit.ProfileAuditReport;
-import com.demo.retrieval.service.audit.ProfileAuditReport.Finding;
-import com.demo.retrieval.service.audit.ProfileAuditReport.Summary;
-import com.demo.retrieval.service.audit.ProfileAuditReport.UserRow;
-import com.demo.retrieval.service.audit.ProfileAuditService;
+import com.recsys.retrieval.service.audit.AccountAuditReport;
+import com.recsys.retrieval.service.audit.ProfileAuditReport;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.Finding;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.Summary;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.UserRow;
+import com.recsys.retrieval.service.audit.ProfileAuditService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

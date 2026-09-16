@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.sequence;
+package com.recsys.retrieval.service.sequence;
 
 import java.util.ArrayList;
 import java.util.List;

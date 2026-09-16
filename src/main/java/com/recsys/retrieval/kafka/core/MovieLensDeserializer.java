@@ -1,7 +1,7 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
-import com.demo.retrieval.kafka.event.MovieLensEvent;
-import com.demo.retrieval.kafka.event.RatingEvent;
+import com.recsys.retrieval.kafka.event.MovieLensEvent;
+import com.recsys.retrieval.kafka.event.RatingEvent;
 
 public class MovieLensDeserializer {
 

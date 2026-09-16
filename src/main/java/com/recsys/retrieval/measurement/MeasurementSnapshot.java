@@ -1,4 +1,4 @@
-package com.demo.retrieval.measurement;
+package com.recsys.retrieval.measurement;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

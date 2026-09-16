@@ -1,12 +1,12 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
-import com.demo.retrieval.kafka.config.Args;
-import com.demo.retrieval.kafka.config.KafkaConfig;
-import com.demo.retrieval.kafka.config.KafkaConsumerConfig;
-import com.demo.retrieval.kafka.config.KafkaProducerConfig;
-import com.demo.retrieval.kafka.config.SslConfig;
-import com.demo.retrieval.kafka.config.WilyConfig;
-import com.demo.retrieval.kafka.event.KafkaMessage;
+import com.recsys.retrieval.kafka.config.Args;
+import com.recsys.retrieval.kafka.config.KafkaConfig;
+import com.recsys.retrieval.kafka.config.KafkaConsumerConfig;
+import com.recsys.retrieval.kafka.config.KafkaProducerConfig;
+import com.recsys.retrieval.kafka.config.SslConfig;
+import com.recsys.retrieval.kafka.config.WilyConfig;
+import com.recsys.retrieval.kafka.event.KafkaMessage;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Function;

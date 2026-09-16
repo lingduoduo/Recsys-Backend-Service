@@ -1,4 +1,4 @@
-package com.demo.retrieval.kafka.config;
+package com.recsys.retrieval.kafka.config;
 
 public record KafkaConfig(
         String dest,

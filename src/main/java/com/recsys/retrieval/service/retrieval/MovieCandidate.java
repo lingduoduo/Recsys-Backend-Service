@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.retrieval;
+package com.recsys.retrieval.service.retrieval;
 
 public record MovieCandidate(
     String movieId,

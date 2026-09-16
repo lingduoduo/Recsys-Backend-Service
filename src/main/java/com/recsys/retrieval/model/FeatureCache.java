@@ -1,9 +1,9 @@
-package com.demo.retrieval.model;
+package com.recsys.retrieval.model;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
-import com.demo.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;

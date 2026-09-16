@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.text;
+package com.recsys.retrieval.service.text;
 
 import java.util.List;
 import java.util.Locale;

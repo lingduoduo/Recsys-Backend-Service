@@ -1,4 +1,4 @@
-package com.demo.retrieval.kafka;
+package com.recsys.retrieval.service;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

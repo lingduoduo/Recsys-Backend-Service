@@ -1,4 +1,4 @@
-package com.demo.retrieval.model;
+package com.recsys.retrieval.model;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;

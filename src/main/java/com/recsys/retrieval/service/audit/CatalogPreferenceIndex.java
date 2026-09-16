@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.service.content.NormalizedProfile;
+import com.recsys.retrieval.service.content.NormalizedProfile;
 
 import java.util.ArrayList;
 import java.util.Collections;

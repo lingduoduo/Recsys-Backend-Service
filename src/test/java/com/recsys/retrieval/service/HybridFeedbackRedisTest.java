@@ -1,11 +1,11 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.model.FeatureCache;
-import com.demo.retrieval.model.FeedbackRequest;
-import com.demo.retrieval.service.clients.UserMovieHistoryClient.UserMovieHistory;
-import com.demo.retrieval.service.query_hydrators.MovieLensUserHistoryQueryHydrator;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.model.FeatureCache;
+import com.recsys.retrieval.model.FeedbackRequest;
+import com.recsys.retrieval.service.clients.UserMovieHistoryClient.UserMovieHistory;
+import com.recsys.retrieval.service.query_hydrators.MovieLensUserHistoryQueryHydrator;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;

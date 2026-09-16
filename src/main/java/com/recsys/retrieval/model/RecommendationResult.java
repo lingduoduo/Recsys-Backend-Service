@@ -1,4 +1,4 @@
-package com.demo.retrieval.model;
+package com.recsys.retrieval.model;
 
 import java.util.List;
 import java.util.Map;

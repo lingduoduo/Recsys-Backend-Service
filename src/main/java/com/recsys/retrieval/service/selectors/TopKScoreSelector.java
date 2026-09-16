@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.selectors;
+package com.recsys.retrieval.service.selectors;
 
 import java.util.ArrayList;
 import java.util.Comparator;

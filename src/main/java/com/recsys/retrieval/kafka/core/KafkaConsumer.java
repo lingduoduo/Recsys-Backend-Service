@@ -1,8 +1,8 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
-import com.demo.retrieval.kafka.config.KafkaConsumerConfig;
-import com.demo.retrieval.kafka.config.SslConfig;
-import com.demo.retrieval.kafka.event.KafkaMessage;
+import com.recsys.retrieval.kafka.config.KafkaConsumerConfig;
+import com.recsys.retrieval.kafka.config.SslConfig;
+import com.recsys.retrieval.kafka.event.KafkaMessage;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;

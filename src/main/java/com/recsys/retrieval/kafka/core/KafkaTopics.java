@@ -1,4 +1,4 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
 public final class KafkaTopics {
     private KafkaTopics() {}

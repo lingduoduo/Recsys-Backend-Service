@@ -1,6 +1,6 @@
-package com.demo.retrieval.model;
+package com.recsys.retrieval.model;
 
-import com.demo.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

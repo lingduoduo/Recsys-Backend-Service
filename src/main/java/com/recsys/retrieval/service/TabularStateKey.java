@@ -1,4 +1,4 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

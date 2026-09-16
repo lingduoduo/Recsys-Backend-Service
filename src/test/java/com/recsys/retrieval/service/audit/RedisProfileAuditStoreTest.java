@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.service.audit.ProfileAuditStore.RawProfile;
-import com.demo.retrieval.service.audit.ProfileAuditStore.ScanResult;
+import com.recsys.retrieval.service.audit.ProfileAuditStore.RawProfile;
+import com.recsys.retrieval.service.audit.ProfileAuditStore.ScanResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;

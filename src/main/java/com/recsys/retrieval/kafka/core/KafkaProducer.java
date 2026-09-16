@@ -1,6 +1,6 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
-import com.demo.retrieval.kafka.config.KafkaProducerConfig;
+import com.recsys.retrieval.kafka.config.KafkaProducerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.ByteArraySerializer;

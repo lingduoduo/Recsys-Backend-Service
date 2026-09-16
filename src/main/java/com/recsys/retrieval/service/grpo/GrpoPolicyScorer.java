@@ -1,9 +1,9 @@
-package com.demo.retrieval.service.grpo;
+package com.recsys.retrieval.service.grpo;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.model.FeatureCache;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.model.FeatureCache;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;

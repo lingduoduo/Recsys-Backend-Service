@@ -1,7 +1,7 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.UserDemographics;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.UserDemographics;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;

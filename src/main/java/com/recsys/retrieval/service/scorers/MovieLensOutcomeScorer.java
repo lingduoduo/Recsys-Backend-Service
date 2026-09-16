@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.scorers;
+package com.recsys.retrieval.service.scorers;
 
 import java.util.ArrayList;
 import java.util.Comparator;

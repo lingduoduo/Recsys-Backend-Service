@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.filters;
+package com.recsys.retrieval.service.filters;
 
-import com.demo.retrieval.service.retrieval.MovieCandidate;
+import com.recsys.retrieval.service.retrieval.MovieCandidate;
 
 import java.util.List;
 

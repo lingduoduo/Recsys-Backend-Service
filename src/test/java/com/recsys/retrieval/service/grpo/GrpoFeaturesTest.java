@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.grpo;
+package com.recsys.retrieval.service.grpo;
 
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

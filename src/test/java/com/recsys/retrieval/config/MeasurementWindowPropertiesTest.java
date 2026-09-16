@@ -1,4 +1,4 @@
-package com.demo.retrieval.config;
+package com.recsys.retrieval.config;
 
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
-package com.demo.retrieval;
+package com.recsys.retrieval;
 
-import com.demo.retrieval.support.ContractFixtures;
+import com.recsys.retrieval.support.ContractFixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;

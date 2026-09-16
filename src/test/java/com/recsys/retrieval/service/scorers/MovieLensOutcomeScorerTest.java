@@ -1,8 +1,8 @@
-package com.demo.retrieval.service.scorers;
+package com.recsys.retrieval.service.scorers;
 
-import com.demo.retrieval.service.scorers.MovieLensOutcomeScorer.MovieLensOutcomeProbabilities;
-import com.demo.retrieval.service.scorers.MovieLensOutcomeScorer.ScoringInput;
-import com.demo.retrieval.service.scorers.MovieLensOutcomeScorer.ScoringResult;
+import com.recsys.retrieval.service.scorers.MovieLensOutcomeScorer.MovieLensOutcomeProbabilities;
+import com.recsys.retrieval.service.scorers.MovieLensOutcomeScorer.ScoringInput;
+import com.recsys.retrieval.service.scorers.MovieLensOutcomeScorer.ScoringResult;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

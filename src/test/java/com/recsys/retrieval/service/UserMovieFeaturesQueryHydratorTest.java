@@ -1,8 +1,8 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.service.query_hydrators.UserMovieFeaturesQueryHydrator;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.query_hydrators.UserMovieFeaturesQueryHydrator;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

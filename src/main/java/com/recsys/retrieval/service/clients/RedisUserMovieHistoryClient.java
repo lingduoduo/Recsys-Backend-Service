@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.clients;
+package com.recsys.retrieval.service.clients;
 
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;

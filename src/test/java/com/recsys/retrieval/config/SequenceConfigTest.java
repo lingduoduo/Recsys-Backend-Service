@@ -1,11 +1,11 @@
-package com.demo.retrieval.config;
+package com.recsys.retrieval.config;
 
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.service.query_hydrators.BehaviorSequencesQueryHydrator;
-import com.demo.retrieval.service.query_hydrators.MovieLensUserHistoryQueryHydrator;
-import com.demo.retrieval.service.query_hydrators.QueryHydrator;
-import com.demo.retrieval.service.sequence.SequenceClient;
-import com.demo.retrieval.service.sequence.SequenceSlice;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.query_hydrators.BehaviorSequencesQueryHydrator;
+import com.recsys.retrieval.service.query_hydrators.MovieLensUserHistoryQueryHydrator;
+import com.recsys.retrieval.service.query_hydrators.QueryHydrator;
+import com.recsys.retrieval.service.sequence.SequenceClient;
+import com.recsys.retrieval.service.sequence.SequenceSlice;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 

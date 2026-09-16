@@ -1,9 +1,9 @@
-package com.demo.retrieval.service.grpo;
+package com.recsys.retrieval.service.grpo;
 
-import com.demo.retrieval.event.RecsysEventAvroCodec;
-import com.demo.retrieval.model.FeedbackRequest;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
+import com.recsys.retrieval.event.RecsysEventAvroCodec;
+import com.recsys.retrieval.model.FeedbackRequest;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DecoderFactory;

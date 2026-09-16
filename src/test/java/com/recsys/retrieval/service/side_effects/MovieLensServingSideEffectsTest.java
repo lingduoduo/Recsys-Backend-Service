@@ -1,13 +1,13 @@
-package com.demo.retrieval.service.side_effects;
+package com.recsys.retrieval.service.side_effects;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.event.RecsysEventAvroCodec;
-import com.demo.retrieval.model.FeatureCache;
-import com.demo.retrieval.service.grpo.GrpoEventPublisher;
-import com.demo.retrieval.service.grpo.GrpoPolicyScorer;
-import com.demo.retrieval.service.replay.ReplayEvent;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.event.RecsysEventAvroCodec;
+import com.recsys.retrieval.model.FeatureCache;
+import com.recsys.retrieval.service.grpo.GrpoEventPublisher;
+import com.recsys.retrieval.service.grpo.GrpoPolicyScorer;
+import com.recsys.retrieval.service.replay.ReplayEvent;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;

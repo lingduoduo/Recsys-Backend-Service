@@ -1,17 +1,17 @@
-package com.demo.retrieval.service.retrieval;
+package com.recsys.retrieval.service.retrieval;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.config.RecommendationProperties.MovieProfile;
-import com.demo.retrieval.measurement.FilterDecision;
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.service.content.CatalogContentScoring;
-import com.demo.retrieval.service.content.NormalizedProfile;
-import com.demo.retrieval.service.filters.CandidateFilter;
-import com.demo.retrieval.service.filters.CandidateFilterResult;
-import com.demo.retrieval.service.filters.FilterContext;
-import com.demo.retrieval.service.filters.PreviouslySeenMoviesBackupFilter;
-import com.demo.retrieval.service.filters.PreviouslySeenMoviesFilter;
-import com.demo.retrieval.service.filters.PreviouslyServedMoviesFilter;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties.MovieProfile;
+import com.recsys.retrieval.measurement.FilterDecision;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.content.CatalogContentScoring;
+import com.recsys.retrieval.service.content.NormalizedProfile;
+import com.recsys.retrieval.service.filters.CandidateFilter;
+import com.recsys.retrieval.service.filters.CandidateFilterResult;
+import com.recsys.retrieval.service.filters.FilterContext;
+import com.recsys.retrieval.service.filters.PreviouslySeenMoviesBackupFilter;
+import com.recsys.retrieval.service.filters.PreviouslySeenMoviesFilter;
+import com.recsys.retrieval.service.filters.PreviouslyServedMoviesFilter;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.ArrayList;

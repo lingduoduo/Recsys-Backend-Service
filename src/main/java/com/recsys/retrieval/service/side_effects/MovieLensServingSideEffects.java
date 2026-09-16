@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.side_effects;
+package com.recsys.retrieval.service.side_effects;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,9 +9,9 @@ import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import com.demo.retrieval.service.grpo.GrpoEventPublisher;
-import com.demo.retrieval.service.grpo.GrpoPolicyScorer;
-import com.demo.retrieval.service.replay.ReplayEvent;
+import com.recsys.retrieval.service.grpo.GrpoEventPublisher;
+import com.recsys.retrieval.service.grpo.GrpoPolicyScorer;
+import com.recsys.retrieval.service.replay.ReplayEvent;
 
 import java.time.Duration;
 import java.util.ArrayList;

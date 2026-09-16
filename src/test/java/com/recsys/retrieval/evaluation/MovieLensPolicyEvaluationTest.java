@@ -1,4 +1,4 @@
-package com.demo.retrieval.evaluation;
+package com.recsys.retrieval.evaluation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

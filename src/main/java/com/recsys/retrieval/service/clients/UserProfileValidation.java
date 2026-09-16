@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.clients;
+package com.recsys.retrieval.service.clients;
 
-import com.demo.retrieval.model.UserBehaviorProfile;
+import com.recsys.retrieval.model.UserBehaviorProfile;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 

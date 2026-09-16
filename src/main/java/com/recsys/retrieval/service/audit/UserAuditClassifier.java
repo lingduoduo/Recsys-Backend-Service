@@ -1,15 +1,15 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.model.UserBehaviorProfile;
-import com.demo.retrieval.service.audit.ProfileAuditReport.Finding;
-import com.demo.retrieval.service.audit.ProfileAuditReport.PreferenceMatch;
-import com.demo.retrieval.service.audit.ProfileAuditReport.PreferenceRef;
-import com.demo.retrieval.service.audit.ProfileAuditReport.UserRow;
-import com.demo.retrieval.service.audit.ProfileAuditStore.RawProfile;
-import com.demo.retrieval.service.clients.UserProfileValidation;
-import com.demo.retrieval.service.clients.UserProfileValidation.Invalid;
-import com.demo.retrieval.service.clients.UserProfileValidation.Result;
-import com.demo.retrieval.service.clients.UserProfileValidation.Valid;
+import com.recsys.retrieval.model.UserBehaviorProfile;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.Finding;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.PreferenceMatch;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.PreferenceRef;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.UserRow;
+import com.recsys.retrieval.service.audit.ProfileAuditStore.RawProfile;
+import com.recsys.retrieval.service.clients.UserProfileValidation;
+import com.recsys.retrieval.service.clients.UserProfileValidation.Invalid;
+import com.recsys.retrieval.service.clients.UserProfileValidation.Result;
+import com.recsys.retrieval.service.clients.UserProfileValidation.Valid;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;

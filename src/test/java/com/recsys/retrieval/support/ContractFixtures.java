@@ -1,4 +1,4 @@
-package com.demo.retrieval.support;
+package com.recsys.retrieval.support;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

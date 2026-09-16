@@ -1,6 +1,6 @@
-package com.demo.retrieval.service;
+package com.recsys.retrieval.service;
 
-import com.demo.retrieval.model.ModelPrediction;
+import com.recsys.retrieval.model.ModelPrediction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 

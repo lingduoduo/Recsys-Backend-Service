@@ -1,9 +1,9 @@
-package com.demo.retrieval.measurement;
+package com.recsys.retrieval.measurement;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.config.RecommendationProperties.MovieProfile;
-import com.demo.retrieval.model.FeatureCache;
-import com.demo.retrieval.model.FeedbackRequest;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties.MovieProfile;
+import com.recsys.retrieval.model.FeatureCache;
+import com.recsys.retrieval.model.FeedbackRequest;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;

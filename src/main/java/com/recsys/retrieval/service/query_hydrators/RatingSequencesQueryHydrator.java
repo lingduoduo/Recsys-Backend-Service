@@ -1,11 +1,11 @@
-package com.demo.retrieval.service.query_hydrators;
+package com.recsys.retrieval.service.query_hydrators;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.service.clients.MovieLensFeatureClient;
-import com.demo.retrieval.service.sequence.SequenceClient;
-import com.demo.retrieval.service.sequence.SequenceSchemaConstants;
-import com.demo.retrieval.service.sequence.SequenceSlice;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.clients.MovieLensFeatureClient;
+import com.recsys.retrieval.service.sequence.SequenceClient;
+import com.recsys.retrieval.service.sequence.SequenceSchemaConstants;
+import com.recsys.retrieval.service.sequence.SequenceSlice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

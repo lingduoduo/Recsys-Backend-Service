@@ -1,4 +1,4 @@
-package com.demo.retrieval.model;
+package com.recsys.retrieval.model;
 
 import java.util.Collections;
 import java.util.Comparator;

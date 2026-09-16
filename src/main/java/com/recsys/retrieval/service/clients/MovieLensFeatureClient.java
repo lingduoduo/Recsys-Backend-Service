@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.clients;
+package com.recsys.retrieval.service.clients;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
 
 import java.util.Optional;
 

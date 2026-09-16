@@ -1,12 +1,12 @@
-package com.demo.retrieval.service.grpo;
+package com.recsys.retrieval.service.grpo;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.model.FeatureCache;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
-import com.demo.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.model.FeatureCache;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServedMovie;
+import com.recsys.retrieval.service.side_effects.MovieLensServingSideEffects.ServingSideEffectRequest;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.HashOperations;

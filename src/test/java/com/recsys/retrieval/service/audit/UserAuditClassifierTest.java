@@ -1,11 +1,11 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.model.UserBehaviorProfile;
-import com.demo.retrieval.service.audit.ProfileAuditReport.Finding;
-import com.demo.retrieval.service.audit.ProfileAuditReport.PreferenceRef;
-import com.demo.retrieval.service.audit.ProfileAuditReport.UserRow;
-import com.demo.retrieval.service.audit.ProfileAuditStore.RawProfile;
-import com.demo.retrieval.service.content.NormalizedProfile;
+import com.recsys.retrieval.model.UserBehaviorProfile;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.Finding;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.PreferenceRef;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.UserRow;
+import com.recsys.retrieval.service.audit.ProfileAuditStore.RawProfile;
+import com.recsys.retrieval.service.content.NormalizedProfile;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

@@ -1,4 +1,4 @@
-package com.demo.retrieval.event;
+package com.recsys.retrieval.event;
 
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaNormalization;

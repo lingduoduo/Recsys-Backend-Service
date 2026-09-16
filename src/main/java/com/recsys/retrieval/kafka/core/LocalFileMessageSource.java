@@ -1,6 +1,6 @@
-package com.demo.retrieval.kafka.core;
+package com.recsys.retrieval.kafka.core;
 
-import com.demo.retrieval.kafka.event.KafkaMessage;
+import com.recsys.retrieval.kafka.event.KafkaMessage;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.UncheckedIOException;

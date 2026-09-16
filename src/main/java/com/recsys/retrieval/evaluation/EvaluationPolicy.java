@@ -1,4 +1,4 @@
-package com.demo.retrieval.evaluation;
+package com.recsys.retrieval.evaluation;
 
 import java.util.Comparator;
 import java.util.Objects;

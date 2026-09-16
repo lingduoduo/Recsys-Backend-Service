@@ -1,6 +1,6 @@
-package com.demo.retrieval.service.retrieval;
+package com.recsys.retrieval.service.retrieval;
 
-import com.demo.retrieval.measurement.FilterDecision;
+import com.recsys.retrieval.measurement.FilterDecision;
 import java.util.List;
 
 public record RetrievalOutcome(

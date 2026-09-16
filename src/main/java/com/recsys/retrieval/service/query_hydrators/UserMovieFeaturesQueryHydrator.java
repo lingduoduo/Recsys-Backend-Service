@@ -1,9 +1,9 @@
-package com.demo.retrieval.service.query_hydrators;
+package com.recsys.retrieval.service.query_hydrators;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.service.*;
-import com.demo.retrieval.service.clients.MovieLensFeatureClient;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.*;
+import com.recsys.retrieval.service.clients.MovieLensFeatureClient;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;

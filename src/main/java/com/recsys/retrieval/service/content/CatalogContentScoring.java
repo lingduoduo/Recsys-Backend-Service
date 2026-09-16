@@ -1,9 +1,9 @@
-package com.demo.retrieval.service.content;
+package com.recsys.retrieval.service.content;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.config.RecommendationProperties.MovieProfile;
-import com.demo.retrieval.service.RecommendationConstants;
-import com.demo.retrieval.service.text.TextNormalization;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties.MovieProfile;
+import com.recsys.retrieval.service.RecommendationConstants;
+import com.recsys.retrieval.service.text.TextNormalization;
 
 import java.util.Collections;
 import java.util.HashMap;

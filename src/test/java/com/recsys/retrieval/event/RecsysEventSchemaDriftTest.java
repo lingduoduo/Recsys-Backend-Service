@@ -1,6 +1,6 @@
-package com.demo.retrieval.event;
+package com.recsys.retrieval.event;
 
-import com.demo.retrieval.support.ContractFixtures;
+import com.recsys.retrieval.support.ContractFixtures;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaNormalization;
 import org.junit.jupiter.api.Test;

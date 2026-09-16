@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
 import java.util.List;
 import java.util.Optional;

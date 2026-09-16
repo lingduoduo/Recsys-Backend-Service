@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;

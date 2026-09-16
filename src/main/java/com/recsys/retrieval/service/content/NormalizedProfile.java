@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.content;
+package com.recsys.retrieval.service.content;
 
 import java.util.Set;
 

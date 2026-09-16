@@ -1,8 +1,8 @@
-package com.demo.retrieval.controller;
+package com.recsys.retrieval.controller;
 
-import com.demo.retrieval.service.audit.ProfileAuditService;
-import com.demo.retrieval.service.audit.ProfileAuditService.AuditBusyException;
-import com.demo.retrieval.service.audit.ProfileAuditService.ProfileAuditFailedException;
+import com.recsys.retrieval.service.audit.ProfileAuditService;
+import com.recsys.retrieval.service.audit.ProfileAuditService.AuditBusyException;
+import com.recsys.retrieval.service.audit.ProfileAuditService.ProfileAuditFailedException;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.constraints.Pattern;
 import org.slf4j.Logger;

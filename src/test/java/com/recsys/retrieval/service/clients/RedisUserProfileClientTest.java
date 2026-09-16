@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.clients;
+package com.recsys.retrieval.service.clients;
 
-import com.demo.retrieval.model.UserBehaviorProfile;
-import com.demo.retrieval.support.ContractFixtures;
+import com.recsys.retrieval.model.UserBehaviorProfile;
+import com.recsys.retrieval.support.ContractFixtures;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;

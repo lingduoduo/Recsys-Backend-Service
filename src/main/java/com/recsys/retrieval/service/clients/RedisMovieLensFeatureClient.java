@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.clients;
+package com.recsys.retrieval.service.clients;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.UserDemographics;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.UserDemographics;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;

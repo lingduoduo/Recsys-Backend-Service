@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.replay;
+package com.recsys.retrieval.service.replay;
 
 import org.junit.jupiter.api.Test;
 

@@ -1,4 +1,4 @@
-package com.demo.retrieval.evaluation;
+package com.recsys.retrieval.evaluation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

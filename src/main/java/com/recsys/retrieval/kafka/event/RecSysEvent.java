@@ -1,6 +1,6 @@
-package com.demo.retrieval.kafka.event;
+package com.recsys.retrieval.kafka.event;
 
-import com.demo.retrieval.kafka.core.KafkaEventSerializer;
+import com.recsys.retrieval.kafka.core.KafkaEventSerializer;
 import java.util.List;
 import java.util.Map;
 

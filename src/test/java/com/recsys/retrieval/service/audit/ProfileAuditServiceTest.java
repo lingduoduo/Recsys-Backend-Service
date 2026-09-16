@@ -1,8 +1,8 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.config.RecommendationProperties.MovieProfile;
-import com.demo.retrieval.service.audit.ProfileAuditReport.UserRow;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.config.RecommendationProperties.MovieProfile;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.UserRow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -19,7 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import static com.demo.retrieval.service.audit.UserAuditClassifierTest.profileJson;
+import static com.recsys.retrieval.service.audit.UserAuditClassifierTest.profileJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;

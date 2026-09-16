@@ -1,6 +1,6 @@
-package com.demo.retrieval.controller;
+package com.recsys.retrieval.controller;
 
-import com.demo.retrieval.service.DeepLearningPredictionService;
+import com.recsys.retrieval.service.DeepLearningPredictionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

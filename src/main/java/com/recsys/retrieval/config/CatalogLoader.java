@@ -1,6 +1,6 @@
-package com.demo.retrieval.config;
+package com.recsys.retrieval.config;
 
-import com.demo.retrieval.config.RecommendationProperties.MovieProfile;
+import com.recsys.retrieval.config.RecommendationProperties.MovieProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;

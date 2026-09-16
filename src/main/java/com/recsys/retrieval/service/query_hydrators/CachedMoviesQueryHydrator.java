@@ -1,7 +1,7 @@
-package com.demo.retrieval.service.query_hydrators;
+package com.recsys.retrieval.service.query_hydrators;
 
-import com.demo.retrieval.service.clients.CachedMoviesClient;
-import com.demo.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.service.clients.CachedMoviesClient;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
 
 import org.springframework.stereotype.Component;
 

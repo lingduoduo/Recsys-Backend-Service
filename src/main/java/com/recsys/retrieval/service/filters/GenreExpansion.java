@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.filters;
+package com.recsys.retrieval.service.filters;
 
 import java.util.LinkedHashSet;
 import java.util.Set;

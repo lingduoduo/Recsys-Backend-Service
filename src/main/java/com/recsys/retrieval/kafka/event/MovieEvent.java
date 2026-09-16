@@ -1,4 +1,4 @@
-package com.demo.retrieval.kafka.event;
+package com.recsys.retrieval.kafka.event;
 
 import java.util.List;
 

@@ -1,9 +1,9 @@
-package com.demo.retrieval.service.query_hydrators;
+package com.recsys.retrieval.service.query_hydrators;
 
-import com.demo.retrieval.model.MovieLensUserFeatures;
-import com.demo.retrieval.model.ScoredMoviesQuery;
-import com.demo.retrieval.model.UserBehaviorProfile;
-import com.demo.retrieval.service.clients.UserProfileClient;
+import com.recsys.retrieval.model.MovieLensUserFeatures;
+import com.recsys.retrieval.model.ScoredMoviesQuery;
+import com.recsys.retrieval.model.UserBehaviorProfile;
+import com.recsys.retrieval.service.clients.UserProfileClient;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;

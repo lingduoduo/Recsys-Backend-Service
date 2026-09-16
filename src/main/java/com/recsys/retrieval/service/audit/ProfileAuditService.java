@@ -1,13 +1,13 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
-import com.demo.retrieval.config.RecommendationProperties;
-import com.demo.retrieval.service.audit.ProfileAuditReport.Finding;
-import com.demo.retrieval.service.audit.ProfileAuditReport.PreferenceRef;
-import com.demo.retrieval.service.audit.ProfileAuditReport.Summary;
-import com.demo.retrieval.service.audit.ProfileAuditReport.UserRow;
-import com.demo.retrieval.service.audit.ProfileAuditStore.ScanResult;
-import com.demo.retrieval.service.content.CatalogContentScoring;
-import com.demo.retrieval.service.content.NormalizedProfile;
+import com.recsys.retrieval.config.RecommendationProperties;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.Finding;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.PreferenceRef;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.Summary;
+import com.recsys.retrieval.service.audit.ProfileAuditReport.UserRow;
+import com.recsys.retrieval.service.audit.ProfileAuditStore.ScanResult;
+import com.recsys.retrieval.service.content.CatalogContentScoring;
+import com.recsys.retrieval.service.content.NormalizedProfile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;

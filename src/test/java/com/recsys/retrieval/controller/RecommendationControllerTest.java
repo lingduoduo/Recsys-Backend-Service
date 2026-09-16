@@ -1,15 +1,15 @@
-package com.demo.retrieval.controller;
+package com.recsys.retrieval.controller;
 
-import com.demo.retrieval.model.FeedbackRequest;
-import com.demo.retrieval.measurement.MeasurementSnapshot;
-import com.demo.retrieval.measurement.RecommendationMeasurementService;
-import com.demo.retrieval.service.DeepLearningPredictionService;
-import com.demo.retrieval.service.HybridRecommendationService;
-import com.demo.retrieval.service.ModelIndexOutOfRangeException;
-import com.demo.retrieval.model.ModelPrediction;
-import com.demo.retrieval.model.RecommendationResult;
-import com.demo.retrieval.model.UserBehaviorProfile;
-import com.demo.retrieval.service.clients.UserProfileClient;
+import com.recsys.retrieval.model.FeedbackRequest;
+import com.recsys.retrieval.measurement.MeasurementSnapshot;
+import com.recsys.retrieval.measurement.RecommendationMeasurementService;
+import com.recsys.retrieval.service.DeepLearningPredictionService;
+import com.recsys.retrieval.service.HybridRecommendationService;
+import com.recsys.retrieval.service.ModelIndexOutOfRangeException;
+import com.recsys.retrieval.model.ModelPrediction;
+import com.recsys.retrieval.model.RecommendationResult;
+import com.recsys.retrieval.model.UserBehaviorProfile;
+import com.recsys.retrieval.service.clients.UserProfileClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

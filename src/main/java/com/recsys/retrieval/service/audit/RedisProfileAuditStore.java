@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.audit;
+package com.recsys.retrieval.service.audit;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.Cursor;

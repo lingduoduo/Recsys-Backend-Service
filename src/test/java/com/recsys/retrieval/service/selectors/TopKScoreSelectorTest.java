@@ -1,4 +1,4 @@
-package com.demo.retrieval.service.selectors;
+package com.recsys.retrieval.service.selectors;
 
 import org.junit.jupiter.api.Test;
 

@@ -75,12 +75,59 @@ does the actual proxying and maps failures to a clean contract:
 | Circuit open | `503` "circuit open — upstream unavailable" |
 | No healthy endpoint (`EmptyEndpointGroupException`) | `503` |
 | Upstream 5xx | passthrough (records CB failure) |
-| Upstream unreachable / exception | `502` "upstream unreachable" |
+| Upstream failure before final headers | `502` "upstream unreachable" |
+| Upstream failure after final headers | Response stream terminates; no replacement JSON error |
 
 A single retry (`maxTotalAttempts=2`, fixed 50 ms backoff) covers transient
 `IOException` — but **not** `SocketTimeoutException` — to ride out Cloud Map
 deregistration windows. `GatewayProxyService.gatewayError` emits `{"error":...}` JSON
 with `Cache-Control: no-store` so CloudFront never caches an error.
+
+### Response streaming
+
+Ordinary proxy responses are forwarded as streams with backpressure. The gateway
+can deliver the first chunk before the upstream finishes, and does not retain the
+entire response body. Request bodies are still aggregated for authorization and
+recommendation request translation. This does not change the separate LLM proxy.
+
+`GatewayUpstreamResponse` preserves response headers, data, and trailers. Circuit
+permits settle exactly once on termination, three ways:
+
+| Termination | Permit |
+|---|---|
+| Completed, final status not 5xx | success |
+| Completed 5xx, or stream error | failure |
+| Downstream cancel, or abort before subscription | **neutral** (`releasePermit`) |
+
+A successful header alone never settles a probe — success is recorded only after
+the stream completes.
+
+The neutral settle matters. A caller that hangs up mid-response carries no
+evidence about upstream health, and counting it as a failure is directly
+exploitable: `/api/catalog/item` and `/api/catalog/similar` are in the default
+`GATEWAY_PUBLIC_PATHS`, so five unauthenticated hang-ups would open the catalog
+circuit and 503 the next genuine caller (measured; pinned red by
+`GatewayUpstreamResponseTest#cancellationsNeverOpenTheRouteCircuit`). The
+buffered implementation was immune only by accident — `aggregate()` subscribed to
+the upstream independently of the client, so a disconnect never reached the
+breaker. `CircuitBreaker.releasePermit` frees a half-open probe slot without
+touching the failure count, so a cancellation neither opens the circuit nor heals
+one, and the next real request still gets to probe.
+
+One residual asymmetry: because backpressure now propagates end to end, a
+*slow* consumer can stall the upstream read until the client `responseTimeout`
+(`GATEWAY_TIMEOUT_MS`) fires. That arrives as a stream error and still counts as a
+failure. It is far harder to exploit than a hang-up — it requires holding a
+connection open for the whole timeout — and a genuinely stalled upstream is
+indistinguishable from it at this layer, so it is deliberately left as a failure.
+
+Failures before final headers retain the existing 502/503 JSON mapping (including
+`Cache-Control: no-store`). After final headers have reached the caller, an upstream
+failure closes/resets the stream; the gateway cannot replace its status or body.
+Consumers must detect incomplete responses. Informational headers do not prevent
+pre-final-header recovery. Slow consumers may still occupy upstream connections
+and encounter the configured response timeout; streaming does not remove timeout
+or network-buffer limits.
 
 ### API versioning and deprecation
 

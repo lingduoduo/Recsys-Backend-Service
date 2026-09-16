@@ -103,6 +103,29 @@ public final class CircuitBreaker {
         }
     }
 
+    /**
+     * Settles a permit without recording an outcome, for a call that ended without evidence
+     * about upstream health (for example a caller that hung up mid-response). A probe permit
+     * releases its half-open slot so the next request can probe; the failure count and the
+     * generation are left untouched, so this neither opens nor closes the breaker. A non-probe
+     * permit holds no slot, so releasing it is a no-op.
+     */
+    public void releasePermit(Permit permit) {
+        if (permit == null || !permit.probe()) return;
+        while (true) {
+            BreakerState snapshot = breakerState.get();
+            if (permit.generation() != snapshot.generation()) return;
+            if (snapshot.probeGeneration() != permit.generation()) return;
+
+            BreakerState released = new BreakerState(
+                    snapshot.generation(),
+                    snapshot.consecutiveFailures(),
+                    snapshot.openedAtMs(),
+                    -1L);
+            if (breakerState.compareAndSet(snapshot, released)) return;
+        }
+    }
+
     public int failureCount() {
         return breakerState.get().consecutiveFailures();
     }

@@ -579,6 +579,13 @@
                      thread inside the proxy and bounded JVM thread growth. Proven red against a
                      blocking-executor mutation. -->
                 <include>**/gateway/LlmProxyStreamConcurrencyTest.java</include>
+                <!-- Ordinary proxy responses stream rather than buffer. Two invariants gate here:
+                     the first chunk must reach the caller before the upstream completes, and a
+                     cancelled request must settle its circuit permit neutrally. Counting a
+                     cancellation as a failure let an unauthenticated caller open a public route's
+                     circuit with five hang-ups; both tests were proven red against that. -->
+                <include>**/gateway/GatewayResponseStreamingTest.java</include>
+                <include>**/gateway/GatewayUpstreamResponseTest.java</include>
                 <include>**/auth/AdminTokenGuardTest.java</include>
                 <include>**/serving/EmbeddingSeedRepairTest.java</include>
                 <include>**/serving/CacheKeyParamTest.java</include>

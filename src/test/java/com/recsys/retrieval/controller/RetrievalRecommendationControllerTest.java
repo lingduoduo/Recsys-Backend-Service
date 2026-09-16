@@ -35,9 +35,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(RecommendationController.class)
+@WebMvcTest(RetrievalRecommendationController.class)
 @SuppressWarnings({"unchecked", "null"})
-class RecommendationControllerTest {
+class RetrievalRecommendationControllerTest {
 
     @Autowired
     private MockMvc mockMvc;

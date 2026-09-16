@@ -41,8 +41,8 @@ import org.springframework.dao.QueryTimeoutException;
 
 @RestController
 @Validated
-public class RecommendationController {
-    private static final Logger log = LoggerFactory.getLogger(RecommendationController.class);
+public class RetrievalRecommendationController {
+    private static final Logger log = LoggerFactory.getLogger(RetrievalRecommendationController.class);
     private static final String DEFAULT_LIMIT = "6";
     private static final int MAX_LIMIT = 50;
 
@@ -55,7 +55,7 @@ public class RecommendationController {
     private final RecommendationMeasurementService measurementService;
     private final UserProfileClient userProfileClient;
 
-    public RecommendationController(
+    public RetrievalRecommendationController(
         StringRedisTemplate redis,
         HybridRecommendationService recommendationService,
         DeepLearningPredictionService predictionService,

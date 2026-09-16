@@ -21,7 +21,7 @@ A request traverses a deliberate pipeline. Some stages are Armeria server decora
 
 | Stage | Where | Effect |
 |---|---|---|
-| `/metrics`, `/health` | server routes | Prometheus + health aggregation, before auth |
+| `/metrics`, `/health`, `/health/live` | server routes | Prometheus, health aggregation, liveness; before auth |
 | **Origin secret** | server decorator | Reject non-CDN traffic `403` (only when enabled) |
 | Route match | `MicroserviceRouteTable` | Longest-prefix; LLM + `/api/recommend` win over catch-all |
 | **Auth** | inside `GatewayProxyService.serve` | Edge auth → principal, or `401` |
@@ -349,6 +349,41 @@ report UP while data requests failed with `no healthy endpoint`. Diagnose that
 mismatch using probe logs and the deployed version; do not infer endpoint
 selectability from the aggregation alone. `GatewayUpstreamHealthCheckIntegrationTest`
 uses a GET-only upstream to guard this behavior and runs in the resilience gate.
+
+### Liveness is a different question from readiness
+
+`GET /health/live`
+([`GatewayLivenessService`](../../src/main/java/com/recsys/application/gateway/GatewayLivenessService.java))
+is a constant `200` that consults nothing. It exists because `/health` above cannot serve as a
+liveness probe: it returns `503` whenever any upstream is down, and to kubelet a failing
+liveness probe means *kill this container*.
+
+The gateway had all three probes on `/health` until 2026-09. The consequences were real in both
+directions:
+
+- **Liveness** (`20s × 3`): an upstream outage of about a minute restarted every gateway pod —
+  discarding warm connection pools and circuit state on the one component still able to serve
+  the routes whose upstreams were healthy.
+- **Startup** (`5s × 24`): a cold start whose upstreams took longer than 120 s to boot — a DR
+  region coming up, a full-namespace restart — killed the gateway before it ever started, and
+  it restarted into the same condition.
+
+Liveness and startup now target `/health/live`. **Readiness deliberately keeps `/health`**: "is
+this pod fit to receive traffic" is a question upstream state legitimately answers. The accepted
+cost is that one upstream being down pulls the gateway out of its target group entirely, even
+for routes whose upstreams are fine — redundant with `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED`
+and the per-route circuit breakers, which degrade the affected route more precisely. Recorded
+as a decision so it is not later mistaken for the same bug.
+
+`/health/live` needs no `GATEWAY_PUBLIC_PATHS` entry and no origin-secret exemption of its own.
+Both gates match with the same prefix-with-boundary rule —
+`path.equals(p) || path.startsWith(p + "/")`, in `GatewayAuthenticator.matchesPrefix` and
+`GatewayOriginSecret.isExempt` — so the existing `/health` entry already covers it. That is
+load-bearing and invisible: tightening either match to exact equality would read as a hardening
+change and would break every gateway pod's liveness probe in the EKS overlays, where
+`GATEWAY_ALLOW_ANONYMOUS=false`. `GatewayLivenessRouteTest` pins it, along with the fact that
+the exact route still wins over the `prefix:/` catch-all that would otherwise proxy the probe to
+an upstream. `GatewayLivenessManifestTest` pins the probe wiring itself.
 
 ## 7. Metrics
 

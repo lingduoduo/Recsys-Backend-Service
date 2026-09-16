@@ -57,6 +57,8 @@ ever been executed in this repo.
   infrastructure/` and unifying its Kafka layer with `infrastructure/messaging` is deliberately
   deferred: it touches every file twice and rewrites code whose tests have not yet been run
   once. It becomes a follow-up, filed with working tests underneath it.
+  - **One exception, forced rather than chosen:** the three controllers move to
+    `com/recsys/api/rest/retrieval`. See "Planning discoveries" below.
 - **Porting the 28 Redis call sites onto `RedisExecutor`.** The bridge below keeps the security
   property without the rewrite.
 - **Exposing the retrieval routes through the CDN or adding cache behaviors.**
@@ -188,6 +190,44 @@ missing file, so it cannot block startup; only a malformed catalog file throws.
   unrunnable against Docker 25+ because docker-java pins API version 1.32 through every
   configuration surface reachable from this project. It will not be verified locally, and that
   limit must be stated rather than worked around.
+
+## Planning discoveries
+
+Two facts found while writing the implementation plan enlarge PR3 beyond the sketch above. Both
+came from reading `BackendRoutePolicy` and `BackendRouteCoverageTest` rather than assuming, and
+both are recorded here because they change what PR3 costs.
+
+**1. An existing test already fails because of the drop-in.**
+`BackendRouteCoverageTest.everyRouteRegistrationLivesWhereAScannerLooks` walks all of
+`src/main/java` and fails on any `@RestController` outside
+`SPRING_SCAN_ROOT` = `src/main/java/com/recsys/api/rest`. It exists precisely so a controller in
+a new package cannot ship unclassified by the gateway's route policy. The drop-in placed three
+controllers outside that root, so this fires as soon as the code compiles — in PR1, before any
+wiring. The fix is to relocate the three controllers into `com/recsys/api/rest/retrieval`, which
+is also where the package map says Spring controllers belong. Their nine routes then become
+visible to the Spring route scanner, and `everyBackendRouteIsClassified` requires every one to
+be classified.
+
+**2. `BackendRoutePolicy` classification uses the backend's own path spelling, and
+`UserIdSource` cannot read a path segment.**
+
+The policy table is keyed by backend service name and already declares
+`/api/v1/model/versions` *with* its version segment; the version-stripping described in
+CLAUDE.md applies to the gateway's inbound path for public-path checks, a different path space
+from the `backendPath` that `lookup(serviceName, backendPath)` receives. Classify with the
+versioned spelling.
+
+More consequentially, three retrieval routes carry the userId in a path segment —
+`/recommend/{user}`, `/predict/{user}/{item}`, `/users/{user}/profile` — and `UserIdSource` has
+only `QUERY`, `BODY` and `BODY_INSTANCES`. Classifying them `AUTHENTICATED` would compile and
+pass every test while letting any authenticated caller read another user's profile and
+recommendations by editing the path. So PR3 adds `UserIdSource.PATH` rather than downgrading the
+routes. This is new scope relative to the design sketch.
+
+A related subtlety worth recording: `/actuator` is already classified `NO_PROXY` for
+`recsys-model-serving`, so the gateway refuses to proxy the model-reload route today. Moving it
+out from under `/actuator` therefore *increases* its reachability. The move and its `OPERATOR`
+classification must land in the same commit.
 
 ## Accepted residuals
 

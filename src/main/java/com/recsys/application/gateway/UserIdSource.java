@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linecorp.armeria.common.AggregatedHttpRequest;
 import com.linecorp.armeria.common.QueryParams;
 
+import java.util.Set;
+
 /**
  * Where a user-scoped backend route carries the {@code userId} it acts on.
  *
@@ -80,10 +82,47 @@ enum UserIdSource {
                 return "";
             }
         }
+    },
+
+    /**
+     * A path segment: {@code /api/v1/retrieval/recommend/123}. The retrieval routes spell the
+     * userId as a path variable, which no other source can read, so without this case they could
+     * only be classified AUTHENTICATED — and any authenticated caller could then read another
+     * user's profile by editing the path.
+     *
+     * <p>Reads the segment <em>after</em> a known marker rather than the last segment:
+     * {@code /predict/{user}/{item}} puts the item last, so "take the tail" would compare the
+     * caller's id against a movie id and deny every legitimate call.
+     */
+    PATH {
+        @Override
+        String extract(String targetPath, AggregatedHttpRequest request) {
+            if (targetPath == null) {
+                return "";
+            }
+            int mark = targetPath.indexOf('?');
+            String path = mark < 0 ? targetPath : targetPath.substring(0, mark);
+            String[] segments = path.split("/");
+            // Stops one short of the end: a marker with nothing after it carries no id.
+            for (int i = 0; i < segments.length - 1; i++) {
+                if (MARKERS.contains(segments[i])) {
+                    return segments[i + 1].trim();
+                }
+            }
+            return "";
+        }
     };
 
     /** The parameter and JSON field name is `userId` on every route in the table. */
     static final String PARAM = "userId";
+
+    /**
+     * The segments {@link #PATH} reads an id from — the segment that follows one of these is the
+     * userId. Kept as a closed set rather than a positional index because the prefix length is not
+     * fixed: the same handler is reachable under several gateway spellings, and a positional rule
+     * would silently read the wrong segment under any of them.
+     */
+    private static final Set<String> MARKERS = Set.of("recommend", "predict", "users");
 
     /** The array field wrapping a TF-Serving predict batch. */
     private static final String INSTANCES = "instances";

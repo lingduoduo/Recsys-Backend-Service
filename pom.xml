@@ -64,6 +64,13 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
+          <!-- Spring MVC binds @PathVariable/@RequestParam by parameter name when no explicit
+               name is given, which requires javac -parameters. Projects that inherit
+               spring-boot-starter-parent get this for free; this pom declares its Spring
+               dependencies explicitly and has no parent, so it must set the flag itself.
+               Without it, implicit-binding controllers fail at request time with
+               IllegalArgumentException, not at compile time. -->
+          <parameters>true</parameters>
           <excludes>
             <exclude>com/recsys/training/embedding/**</exclude>
             <exclude>com/recsys/online/flink/**</exclude>
@@ -158,6 +165,23 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-aop</artifactId>
       <version>${spring-boot.version}</version>
+    </dependency>
+
+    <!-- The retrieval code reaches Redis through Spring Data's StringRedisTemplate.
+         RedisAutoConfiguration is excluded in ModelApplication and the template is built
+         by RetrievalRedisConfig from recsys.redis, so LettuceClientFactory's
+         REDIS_ALLOW_NO_AUTH guard still covers these call sites. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+      <version>${spring-boot.version}</version>
+    </dependency>
+    <!-- RecsysEventAvroCodec encodes GRPO impression events against
+         src/main/resources/schemas/recsys-event-v3.avsc. -->
+    <dependency>
+      <groupId>org.apache.avro</groupId>
+      <artifactId>avro</artifactId>
+      <version>1.11.3</version>
     </dependency>
 
     <!-- ONNX Runtime for Java user-tower inference. -->

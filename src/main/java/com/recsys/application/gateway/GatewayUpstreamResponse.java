@@ -19,15 +19,22 @@ final class GatewayUpstreamResponse {
     private GatewayUpstreamResponse() {}
 
     /** How a terminated relay should settle its circuit permit. */
-    private enum Outcome { SUCCESS, FAILURE, NEUTRAL }
+    private enum Outcome {
+        SUCCESS("success"), FAILURE("failure"), NEUTRAL("neutral");
+
+        private final String label;
+
+        Outcome(String label) { this.label = label; }
+    }
 
     static HttpResponse relay(HttpResponse upstream, RouteCircuitBreaker breaker,
-                              RouteCircuitBreaker.Permit permit, String routeName) {
+                              RouteCircuitBreaker.Permit permit, String routeName,
+                              GatewayCircuitMetrics metrics) {
         AtomicBoolean settled = new AtomicBoolean();
         // A deferred downstream can abort the relay before subscribing. Filter callbacks do
         // not run in that case, but the upstream still completes exceptionally.
         upstream.whenComplete().whenComplete((unused, cause) -> {
-            if (cause != null) settle(breaker, permit, settled, classify(cause));
+            if (cause != null) settle(breaker, permit, settled, classify(cause), routeName, metrics);
         });
         HttpResponse observed = new FilteredHttpResponse(upstream, true) {
             private HttpStatus status;
@@ -44,12 +51,12 @@ final class GatewayUpstreamResponse {
             @Override
             protected void beforeComplete(Subscriber<? super HttpObject> subscriber) {
                 settle(breaker, permit, settled, status != null && !status.isServerError()
-                        ? Outcome.SUCCESS : Outcome.FAILURE);
+                        ? Outcome.SUCCESS : Outcome.FAILURE, routeName, metrics);
             }
 
             @Override
             protected Throwable beforeError(Subscriber<? super HttpObject> subscriber, Throwable cause) {
-                settle(breaker, permit, settled, classify(cause));
+                settle(breaker, permit, settled, classify(cause), routeName, metrics);
                 return cause;
             }
 
@@ -59,7 +66,7 @@ final class GatewayUpstreamResponse {
                 // failure would let any client — including an unauthenticated one on a public
                 // route — open this route's circuit by cancelling repeatedly. Release the
                 // half-open probe slot instead, so the next real request still gets to probe.
-                settle(breaker, permit, settled, Outcome.NEUTRAL);
+                settle(breaker, permit, settled, Outcome.NEUTRAL, routeName, metrics);
             }
         };
         // Recovery is possible before final headers (informational headers are allowed).
@@ -86,13 +93,17 @@ final class GatewayUpstreamResponse {
     }
 
     private static void settle(RouteCircuitBreaker breaker, RouteCircuitBreaker.Permit permit,
-                               AtomicBoolean settled, Outcome outcome) {
+                               AtomicBoolean settled, Outcome outcome, String routeName,
+                               GatewayCircuitMetrics metrics) {
         if (breaker == null || permit == null || !settled.compareAndSet(false, true)) return;
         switch (outcome) {
             case SUCCESS -> breaker.recordSuccess(permit);
             case FAILURE -> breaker.recordFailure(permit);
             case NEUTRAL -> breaker.releasePermit(permit);
         }
+        // Inside the CAS deliberately: the counter inherits settle-exactly-once rather than
+        // needing its own guard, so the three outcomes always sum to the permits taken.
+        if (metrics != null) metrics.record(routeName, outcome.label);
     }
 
     private static boolean noHealthyEndpoint(Throwable cause) {

@@ -102,6 +102,20 @@ permits settle exactly once on termination, three ways:
 A successful header alone never settles a probe — success is recorded only after
 the stream completes.
 
+Each settle is counted as `gateway_circuit_settle_total{route,outcome}`
+(`GatewayCircuitMetrics`), with `outcome` one of `success` / `failure` / `neutral`.
+This exists because circuit state alone cannot distinguish a healthy route from a
+route whose callers are constantly hanging up: neutral settles are invisible to the
+breaker by design, so without this meter a route can churn permits while `/health`
+reports `circuitState: CLOSED` and nothing explains why latency or upstream load
+looks odd. A rising `failure` rate is the upstream; a rising `neutral` rate is the
+clients. The counter increments inside the same compare-and-set that settles the
+permit, so the three outcomes always sum to the permits actually taken — no
+separate dedup, and no way for the two cancellation paths (`onCancellation` and the
+`whenComplete` hook) to double-count. There is deliberately **no alert** on it: with
+cancellations neutral, an open circuit already means genuine failures, so the
+existing circuit-state signal is the alertable one and this meter is for diagnosis.
+
 The neutral settle matters. A caller that hangs up mid-response carries no
 evidence about upstream health, and counting it as a failure is directly
 exploitable: `/api/catalog/item` and `/api/catalog/similar` are in the default

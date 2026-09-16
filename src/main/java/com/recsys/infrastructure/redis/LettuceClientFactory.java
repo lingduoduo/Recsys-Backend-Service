@@ -46,6 +46,16 @@ public final class LettuceClientFactory {
      * router overload stay unguarded so unit tests can construct and inspect URIs without a
      * credential.
      */
+    /**
+     * Public entry point for callers outside this package that build their own client from
+     * {@link RedisProperties} — today, {@code RetrievalRedisConfig}, which hands Spring Data
+     * Redis a connection factory. Without this, the Spring Data path would be the one way into
+     * Redis that the credential guard does not cover.
+     */
+    public static void requireAuthentication(RedisProperties props, Map<String, String> env) {
+        requireAuthentication(props.getPassword(), env);
+    }
+
     static void requireAuthentication(String password, Map<String, String> env) {
         if (password != null && !password.isBlank()) return;
         if (Boolean.parseBoolean(env.getOrDefault("REDIS_ALLOW_NO_AUTH", "false"))) {

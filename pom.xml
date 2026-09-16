@@ -529,6 +529,11 @@
                      so nothing but this test notices it disappearing — a cluster missing it just
                      goes back to never restarting an OOM'd pod, silently. -->
                 <include>**/k8s/OomPolicyManifestTest.java</include>
+                <!-- The manifest half of GatewayLivenessRouteTest: the route can exist and be
+                     correct while the probe still points at /health. Also enforces, across every
+                     workload, that a liveness path is a known constant-200 handler — an allow-list,
+                     so a new dependency-aware liveness probe fails by default. -->
+                <include>**/k8s/GatewayLivenessManifestTest.java</include>
                 <!-- The IRSA comments in k8s/ are the instructions an operator provisions IAM
                      from, and no machine applies them, so a wrong claim there fails as an
                      AccessDenied in production or as a silent over-grant. This pins the source

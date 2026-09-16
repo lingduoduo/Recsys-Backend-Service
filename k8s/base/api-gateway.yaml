@@ -108,9 +108,15 @@ spec:
             preStop:
               exec:
                 command: ["sleep", "5"]
+          # Startup and liveness ask whether this process is running; /health/live answers only
+          # that. Readiness keeps /health, which reports upstream reachability and 503s when an
+          # upstream is down — the right answer for "should traffic come here" and the wrong one
+          # for "should this container be killed". All three used to point at /health, so an
+          # upstream outage restarted every gateway pod and a slow cold start never finished.
+          # See 18_Fault_Tolerance.md §9.5 and 09_API_Gateway.md.
           startupProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: http
             failureThreshold: 24
             periodSeconds: 5
@@ -121,7 +127,7 @@ spec:
             periodSeconds: 5
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: http
             periodSeconds: 20
           resources:

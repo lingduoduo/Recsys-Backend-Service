@@ -210,16 +210,8 @@ public final class MicroserviceGatewayServer {
             sb.decorator(deprecation.newDecorator());
         }
 
-        // Health endpoint — exposes per-route circuit state and upstream reachability.
-        sb.service("/health", new GatewayHealthService(allRoutes, timeout, circuitBreakers, port, registryProvider));
-
-        // Liveness — process viability only, never upstream state. /health answers 503 when an
-        // upstream is down, which is correct for readiness and wrong for liveness: it would make
-        // kubelet restart every gateway pod during an upstream outage, discarding warm pools and
-        // circuit state on the one component still able to serve the healthy routes. It needs no
-        // GATEWAY_PUBLIC_PATHS entry: both GatewayAuthenticator and GatewayOriginSecret match by
-        // prefix-with-boundary, so the existing "/health" entry covers it. See 09_API_Gateway.md.
-        sb.service("/health/live", new GatewayLivenessService());
+        registerHealthRoutes(sb,
+                new GatewayHealthService(allRoutes, timeout, circuitBreakers, port, registryProvider));
 
         // LLM path: build a tuned, shared ClientFactory (only when LLM routes exist) and register
         // each LLM route from it. Register LLM routes before the catch-all so Armeria's
@@ -302,6 +294,27 @@ public final class MicroserviceGatewayServer {
                 .idleTimeout(Duration.ofMillis(idleMs))
                 .pingIntervalMillis(pingMs)
                 .build();
+    }
+
+    /**
+     * The two health routes, which answer different questions and must not be collapsed.
+     *
+     * <p>{@code /health} aggregates upstream reachability and circuit state and returns 503 when
+     * any backend is down — right for readiness, wrong for liveness, where 503 means "kill this
+     * container". Pointing liveness at it made an upstream outage restart every gateway pod, and
+     * made a slow cold start kill the gateway before it ever finished starting.
+     *
+     * <p>{@code /health/live} is a constant 200. It needs no {@code GATEWAY_PUBLIC_PATHS} entry:
+     * the authenticator is not a server-wide decorator and never sees an exact route like this
+     * one, and {@code GatewayOriginSecret} — the only server-wide gate that can reject — exempts
+     * it by prefix under the existing "/health" entry.
+     *
+     * <p>Extracted (mirroring {@link #registerRecommendRoutes}) so the integration harness shares
+     * this registration rather than mirroring it by hand and drifting from it.
+     */
+    static void registerHealthRoutes(ServerBuilder sb, GatewayHealthService healthService) {
+        sb.service("/health", healthService);
+        sb.service("/health/live", new GatewayLivenessService());
     }
 
     // Canonical recommendation endpoint — exact path takes precedence over the catch-all. Both

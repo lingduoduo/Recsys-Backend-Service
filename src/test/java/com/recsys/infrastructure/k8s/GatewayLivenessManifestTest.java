@@ -31,6 +31,8 @@ class GatewayLivenessManifestTest {
 
     private static final String GATEWAY = "recsys-api-gateway";
 
+    private static final String GATEWAY_CONTAINER = "api-gateway";
+
     /**
      * HTTP paths whose handler is a constant 200 that inspects no dependency. Anything else is
      * unfit for liveness. Kept as an allow-list rather than a deny-list of known-bad paths: a new
@@ -44,6 +46,14 @@ class GatewayLivenessManifestTest {
             // catalog serving: RecommendationService.Health is a constant {"ok": true}. Correct
             // behaviour under an inconsistent name; renaming churns a manifest for no gain.
             "/health");
+
+    /**
+     * Liveness {@code exec} commands that check only the process in their own container. Redis
+     * and Sentinel ping themselves over the loopback, which is a self-check, not a dependency.
+     */
+    private static final Set<List<String>> SELF_CHECK_COMMANDS = Set.of(
+            List.of("redis-cli", "ping"),
+            List.of("redis-cli", "-p", "26379", "ping"));
 
     private static Map<String, Object> podSpecOf(Map<String, Object> workload) {
         Map<String, Object> direct = mapAt(workload, "spec", "template", "spec");
@@ -59,9 +69,15 @@ class GatewayLivenessManifestTest {
         List<Map<String, Object>> docs = ManifestDocuments.allIn(BASE);
         for (Map<String, Object> workload : ofKind(docs, "Deployment")) {
             if (GATEWAY.equals(nameOf(workload))) {
-                List<Map<String, Object>> containers = listOf(podSpecOf(workload), "containers");
-                assertThat(containers).as(GATEWAY + " has no containers").isNotEmpty();
-                return containers.get(0);
+                // By name, not index: a sidecar inserted at position 0 would silently move
+                // every assertion below onto the wrong container.
+                for (Map<String, Object> container : listOf(podSpecOf(workload), "containers")) {
+                    if (GATEWAY_CONTAINER.equals(container.get("name"))) {
+                        return container;
+                    }
+                }
+                throw new AssertionError(
+                        "no container named " + GATEWAY_CONTAINER + " in " + GATEWAY);
             }
         }
         throw new AssertionError("no Deployment named " + GATEWAY + " in " + BASE);
@@ -93,6 +109,13 @@ class GatewayLivenessManifestTest {
         assertThat(probePath(gatewayContainer(), "readinessProbe")).isEqualTo("/health");
     }
 
+    /**
+     * Covers both probe forms, because checking only {@code httpGet} would silently skip the
+     * three {@code exec} probes in {@code redis-cluster.yaml} while the test name claimed to
+     * cover everything. Those three are {@code redis-cli ping} — a self-check against the
+     * process the container runs, which is what liveness should be — so they are named
+     * exemptions rather than an unexamined blind spot.
+     */
     @Test
     void noLivenessProbeAnywhereDependsOnADependency() throws IOException {
         List<Map<String, Object>> docs = ManifestDocuments.allIn(BASE);
@@ -101,18 +124,31 @@ class GatewayLivenessManifestTest {
         for (String kind : List.of("Deployment", "StatefulSet", "CronJob")) {
             for (Map<String, Object> workload : ofKind(docs, kind)) {
                 for (Map<String, Object> container : listOf(podSpecOf(workload), "containers")) {
+                    Map<String, Object> probe = mapAt(container, "livenessProbe");
+                    if (probe == null) {
+                        continue;
+                    }
+                    String where = nameOf(workload) + "/" + container.get("name");
                     String path = probePath(container, "livenessProbe");
-                    if (path != null && !CONSTANT_200_PATHS.contains(path)) {
-                        offenders.add(nameOf(workload) + "/" + container.get("name") + " -> " + path);
+                    if (path != null) {
+                        if (!CONSTANT_200_PATHS.contains(path)) {
+                            offenders.add(where + " -> httpGet " + path);
+                        }
+                        continue;
+                    }
+                    List<String> command = ManifestDocuments.stringListOf(
+                            mapAt(container, "livenessProbe", "exec"), "command");
+                    if (!SELF_CHECK_COMMANDS.contains(command)) {
+                        offenders.add(where + " -> exec " + command);
                     }
                 }
             }
         }
 
         assertThat(offenders)
-                .as("a liveness probe must answer \"is this process running\". These point at a "
-                        + "path that is not a known constant-200 handler; if the handler really is "
-                        + "constant, add the path to CONSTANT_200_PATHS with the handler named")
+                .as("a liveness probe must answer \"is this process running\". These use a path "
+                        + "or command that is not a known self-check; if it really is one, add it "
+                        + "to CONSTANT_200_PATHS or SELF_CHECK_COMMANDS naming the handler")
                 .isEmpty();
     }
 }

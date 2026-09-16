@@ -52,18 +52,23 @@ class GatewayLivenessRouteTest {
     }
 
     /**
-     * The probe reaches the pod with no credentials. In the EKS overlays GATEWAY_ALLOW_ANONYMOUS
-     * is false, so a path the authenticator does not treat as public gets 401 — and a liveness
-     * probe that 401s restarts the pod on a loop.
+     * The authenticator is <b>not</b> on the probe's path, and this test does not claim it is.
+     * {@code GatewayAuthenticator.check} is called from exactly three request-handling services —
+     * {@code GatewayProxyService}, {@code RecommendationGatewayService}, {@code LlmProxyService} —
+     * and never as a server-wide decorator, so an exact route registered on the {@code
+     * ServerBuilder} bypasses it entirely. The gate that <i>does</i> see every request is the
+     * origin-secret decorator; {@link #livenessPathIsExemptFromTheOriginSecret} covers that one.
      *
-     * <p>/health/live is public today only because {@code GatewayAuthenticator} matches public
-     * paths by prefix-with-boundary ({@code path.equals(p) || path.startsWith(p + "/")}), so the
-     * existing "/health" entry covers it and no config change was needed. That is load-bearing and
-     * invisible: tightening the match to exact equality would look like a hardening change and
-     * would take down every gateway pod's liveness probe. This is the test that catches it.
+     * <p>What this pins is the fallback. {@code GatewayProxyService.serve} calls {@code check}
+     * <i>before</i> {@code routeTable.match}, so if the exact route were ever removed and the
+     * request fell through to the catch-all, the authenticator would be reached — and in the EKS
+     * overlays, where GATEWAY_ALLOW_ANONYMOUS is false, a non-public path would 401 rather than
+     * reach the 404 that {@link #exactLivenessRouteWinsOverTheCatchAllProxy} describes.
+     * "/health/live" is public under the deployed config only because {@code matchesPrefix} uses
+     * prefix-with-boundary, so the "/health" entry covers it.
      */
     @Test
-    void livenessPathIsAnonymouslyReachableUnderTheDeployedPublicPaths() {
+    void livenessPathWouldStayPublicIfItEverFellThroughToTheCatchAll() {
         // Exactly the GATEWAY_PUBLIC_PATHS value from k8s/base/configmap.yaml.
         GatewayAuthenticator auth = GatewayAuthenticator.forTesting(
                 Set.of("a-real-api-key"),
@@ -78,16 +83,50 @@ class GatewayLivenessRouteTest {
     }
 
     /**
-     * The gateway registers a {@code prefix:/} catch-all that proxies everything it does not
-     * serve itself, so a liveness probe swallowed by it would be answered by an upstream — the
-     * exact dependency this route exists to remove, reintroduced invisibly, and looking healthy
-     * right up until the upstream is the thing that is down.
+     * The gateway registers a {@code prefix:/} catch-all, so the exact route has to win or the
+     * probe is answered by something else entirely. In production that something else is a 404:
+     * {@code GatewayProxyService.serve} calls {@code routeTable.match("/health/live")}, every
+     * route prefix is {@code /api/...}, so it returns null and the service answers
+     * {@code 404 "no route found"} — it does <b>not</b> proxy the probe to an upstream. Either
+     * way the probe fails and every pod restarts on a loop; only the status code differs.
      *
      * <p>Armeria is documented to prefer an exact path over a prefix, and {@code /health} has
      * relied on that in production for as long as the catch-all has existed. Measured here
-     * anyway, on a real server with a catch-all that answers a distinguishable status, because
-     * "the framework surely does X" is how the liveness coupling this change fixes got shipped.
+     * anyway, on a real server whose catch-all answers a distinguishable status, because "the
+     * framework surely does X" is how the liveness coupling this change fixes got shipped.
      */
+    /**
+     * The origin-secret decorator is the one server-wide gate the probe really passes through
+     * ({@code MicroserviceGatewayServer} registers exactly four: metrics, slow-request logging,
+     * this, and API deprecation — and only this one can reject). It is enabled wherever the CDN
+     * is, from the {@code recsys-gateway-origin} Secret, and the kubelet reaches the pod
+     * directly with no {@code x-origin-secret} header at all.
+     *
+     * <p>So this is the assertion that keeps the probe alive: {@code isExempt} matches by
+     * prefix-with-boundary, which is why "/health/live" inherits the "/health" exemption and
+     * needed no config change. Tightening that to exact equality reads as a hardening change,
+     * leaves the three existing {@code GatewayOriginSecretTest} cases green — they only cover
+     * "/health", "/metrics" and a non-exempt "/healthcheck" — and gives every gateway pod a 403
+     * liveness probe, CrashLoopBackOff-ing the sole public entry point with a green CI.
+     */
+    @Test
+    void livenessPathIsExemptFromTheOriginSecret() {
+        GatewayOriginSecret secret = GatewayOriginSecret.fromEnvironment(
+                name -> "GATEWAY_ORIGIN_SECRET".equals(name) ? "s3cret" : null);
+        assertThat(secret.isEnabled())
+                .as("the exemption is only meaningful while the gate is on")
+                .isTrue();
+
+        RequestHeaders kubeletProbe = RequestHeaders.of(HttpMethod.GET, "/health/live");
+
+        assertThat(secret.isAllowed(kubeletProbe, "/health/live"))
+                .as("the kubelet sends no x-origin-secret; a 403 here restarts every pod")
+                .isTrue();
+        assertThat(secret.isAllowed(kubeletProbe, "/api/catalog/item"))
+                .as("the exemption must stay narrow — a data route without the secret is still 403")
+                .isFalse();
+    }
+
     @Test
     void exactLivenessRouteWinsOverTheCatchAllProxy() {
         Server server = Server.builder()

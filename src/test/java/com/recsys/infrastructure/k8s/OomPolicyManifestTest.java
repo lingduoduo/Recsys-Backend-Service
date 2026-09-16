@@ -27,10 +27,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * env value, so nothing else would notice it going missing — not a compiler, not a schema, and
  * not a running cluster, which would simply go back to never restarting an OOM'd pod.
  *
- * <p>The workload set is <b>derived from the manifests</b>, never hardcoded. A hardcoded list
- * passes forever while the property quietly stops being universal: the next service added with a
- * JAVA_OPTS of its own would be exempt by omission, which is the one failure mode a conformance
- * test exists to prevent.
+ * <p>The workload set is <b>derived from the manifests</b>, never hardcoded, and derived from
+ * {@code RECSYS_MAIN_CLASS} rather than from {@code JAVA_OPTS}. That distinction is the whole
+ * point. Deriving "containers that set JAVA_OPTS" only checks workloads that already opted in:
+ * a new JVM workload added with no JAVA_OPTS entry at all inherits the image default
+ * ({@code Dockerfile}: {@code ENV JAVA_OPTS=""}), carries no flag, and passes — the omission
+ * case, which is exactly the one a conformance test exists to catch. {@code RECSYS_MAIN_CLASS}
+ * is what makes a container a JVM workload in this repo: all six set it and the redis and
+ * sentinel containers do not, so "sets RECSYS_MAIN_CLASS ⇒ must set JAVA_OPTS ⇒ must carry the
+ * flag" is a closed derivation rather than a self-selecting one.
  */
 class OomPolicyManifestTest {
 
@@ -47,19 +52,32 @@ class OomPolicyManifestTest {
         return direct != null ? direct : mapAt(workload, "spec", "jobTemplate", "spec", "template", "spec");
     }
 
-    /** "&lt;workload&gt;/&lt;container&gt;" -&gt; JAVA_OPTS value, for every container that sets one. */
-    private static Map<String, String> javaOptsByContainer() throws IOException {
+    /** The value of {@code name} in this container's env, or null when it sets no such entry. */
+    private static String envValue(Map<String, Object> container, String name) {
+        for (Map<String, Object> env : listOf(container, "env")) {
+            if (name.equals(env.get("name")) && env.get("value") != null) {
+                return String.valueOf(env.get("value"));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * "&lt;workload&gt;/&lt;container&gt;" -&gt; JAVA_OPTS (null when unset), for every container
+     * that is a JVM workload — i.e. every container that names a main class for the image
+     * entrypoint to run.
+     */
+    private static Map<String, String> javaOptsByJvmContainer() throws IOException {
         List<Map<String, Object>> docs = ManifestDocuments.allIn(BASE);
         Map<String, String> found = new LinkedHashMap<>();
         for (String kind : WORKLOAD_KINDS) {
             for (Map<String, Object> workload : ofKind(docs, kind)) {
                 for (Map<String, Object> container : listOf(podSpecOf(workload), "containers")) {
-                    for (Map<String, Object> env : listOf(container, "env")) {
-                        if ("JAVA_OPTS".equals(env.get("name")) && env.get("value") != null) {
-                            found.put(nameOf(workload) + "/" + container.get("name"),
-                                    String.valueOf(env.get("value")));
-                        }
+                    if (envValue(container, "RECSYS_MAIN_CLASS") == null) {
+                        continue;
                     }
+                    String key = nameOf(workload) + "/" + container.get("name");
+                    found.put(key, envValue(container, "JAVA_OPTS"));
                 }
             }
         }
@@ -68,23 +86,26 @@ class OomPolicyManifestTest {
 
     @Test
     void everyJvmWorkloadExitsOnOutOfMemoryError() throws IOException {
-        Map<String, String> javaOpts = javaOptsByContainer();
+        Map<String, String> javaOpts = javaOptsByJvmContainer();
 
         assertThat(javaOpts)
-                .as("no container in k8s/base sets JAVA_OPTS — the derivation is broken, "
+                .as("no container in k8s/base sets RECSYS_MAIN_CLASS — the derivation is broken, "
                         + "and a green result here would prove nothing")
                 .isNotEmpty();
 
         List<String> missing = new ArrayList<>();
         javaOpts.forEach((container, opts) -> {
-            if (!opts.contains(OOM_EXIT_FLAG)) {
+            if (opts == null) {
+                missing.add(container + " -> sets no JAVA_OPTS at all (inherits the image's "
+                        + "empty default, so it carries no flags)");
+            } else if (!opts.contains(OOM_EXIT_FLAG)) {
                 missing.add(container + " -> \"" + opts + "\"");
             }
         });
 
         assertThat(missing)
                 .as("every JVM workload must exit on OutOfMemoryError so the platform restarts it; "
-                        + "these set JAVA_OPTS without " + OOM_EXIT_FLAG)
+                        + "these do not carry " + OOM_EXIT_FLAG)
                 .isEmpty();
     }
 

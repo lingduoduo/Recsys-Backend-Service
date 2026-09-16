@@ -336,12 +336,20 @@
                 <include>**/loadshed/*Test.java</include>
                 <include>**/gateway/UpstreamEndpointGroupsTest.java</include>
                 <!-- Liveness must not depend on upstreams, or an upstream outage restarts every
-                     gateway pod. Also pins two things that hold only by accident of other code:
-                     /health/live stays anonymously reachable (it is public via prefix matching on
-                     the "/health" entry, so tightening that match would break the probe in
-                     production), and the exact route still beats the prefix:/ catch-all, which
-                     would otherwise proxy the probe to the very upstream it must not depend on. -->
+                     gateway pod. The load-bearing case here is the origin secret: it is the only
+                     server-wide decorator that can reject, it is enabled wherever the CDN is, and
+                     the kubelet sends no x-origin-secret — /health/live survives only because
+                     GatewayOriginSecret.isExempt matches by prefix. Tightening that to exact
+                     equality leaves every GatewayOriginSecretTest case green and gives every
+                     gateway pod a 403 liveness probe. Also pins that the exact route beats the
+                     prefix:/ catch-all, which would otherwise 404 the probe. -->
                 <include>**/gateway/GatewayLivenessRouteTest.java</include>
+                <!-- Carries the only assertion that fails if MicroserviceGatewayServer stops
+                     registering /health/live: the unit tests instantiate the handler directly and
+                     the manifest test reads YAML, so all of them stay green while the manifests
+                     point livenessProbe at a path the real gateway 404s. Also the only coverage of
+                     the probe through the fully assembled server-wide decorator stack. -->
+                <include>**/gateway/GatewayServerIntegrationTest.java</include>
                 <include>**/gateway/GatewayUpstreamHealthCheckIntegrationTest.java</include>
                 <include>**/ratelimit/RedisRateLimiterTest.java</include>
                 <include>**/retrieval/multichannel/*DegradationTest.java</include>

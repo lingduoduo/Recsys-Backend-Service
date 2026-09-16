@@ -84,27 +84,35 @@ Add a constant-200 `/health/live` to `MicroserviceGatewayServer`, mirroring
 `OnlineServices.Live`, and point `livenessProbe` and `startupProbe` at it. `readinessProbe`
 keeps `/health`.
 
-**No auth or config change is needed, and that conclusion was measured rather than assumed.**
-The obvious worry is that a kubelet probe on a brand-new path gets `401` in the EKS overlays,
-where `GATEWAY_ALLOW_ANONYMOUS=false`, because the public-path set is the literal
-`/health,/api/catalog/item,/api/catalog/similar` and `GATEWAY_PUBLIC_PATHS` is documented as
-having to list exact paths. It does not, because both gates match with the same
-prefix-plus-boundary rule:
+**No auth or config change is needed.** *(Corrected during review — the first version of this
+section named the wrong mechanism, and the wrong one is the more intuitive one.)*
 
-- `GatewayAuthenticator.matchesPrefix` — `path.equals(prefix) || path.startsWith(prefix + "/")`
-- `GatewayOriginSecret.isExempt` — the identical expression
+The worry is that a kubelet probe on a brand-new path gets `401` in the EKS overlays, where
+`GATEWAY_ALLOW_ANONYMOUS=false` and the public-path set is the literal
+`/health,/api/catalog/item,/api/catalog/similar`. It does not, but **not** because the
+authenticator's prefix matching covers it. The authenticator is never consulted at all:
+`GatewayAuthenticator.check` is called from exactly three request-handling services
+(`GatewayProxyService`, `RecommendationGatewayService`, `LlmProxyService`) and is not a
+server-wide decorator, so an exact route on the `ServerBuilder` bypasses it entirely.
 
-So the existing `/health` entry already covers `/health/live` on both gates. ("Must list exact
-paths" in `CLAUDE.md` is guidance *because* matching is prefix-based — a bare `/api/catalog`
-entry would swallow `/api/catalog/user` — not a description of exact-match semantics.)
+The gate that *does* see every request is `GatewayOriginSecret`, one of four server-wide
+decorators and the only one that can reject. It is enabled wherever the CDN is, and the kubelet
+sends no `x-origin-secret`. `/health/live` passes because `isExempt` matches by
+prefix-with-boundary — `path.equals(p) || path.startsWith(p + "/")` — so the existing `/health`
+exemption covers it. **That** is the load-bearing, invisible property: tightening `isExempt` to
+exact equality reads as hardening, leaves every existing `GatewayOriginSecretTest` case green,
+and 403s every gateway pod's liveness probe. Pinned by
+`GatewayLivenessRouteTest.livenessPathIsExemptFromTheOriginSecret`, verified by mutating
+`isExempt` and confirming that test is the only one that fails.
 
-`/health/live` is not under `PROTECTED_PREFIXES`, so the never-public override does not apply
-either. The unit coverage below pins this reachability rather than assuming it: if anyone ever
-tightens `matchesPrefix` to exact equality, the gateway's liveness probe starts failing in
-production, and that test is what turns that into a CI failure instead.
+The authenticator's prefix matching is still worth a test, but as a *fallback*: because
+`GatewayProxyService.serve` calls `check` before `routeTable.match`, it would apply only if the
+exact route were removed and the request fell through to the catch-all.
 
 `BackendRoutePolicy` classifies `/health` as `NO_PROXY`; `/health/live` is served locally off
-the server builder and never forwarded, so it needs no new entry.
+the server builder and never forwarded, so it needs no new entry. Were the exact route ever
+removed, the catch-all would answer `404 "no route found"` rather than proxying the probe —
+`routeTable.match("/health/live")` returns null, since every route prefix is `/api/...`.
 
 ### Enforcement
 

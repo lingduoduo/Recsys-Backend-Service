@@ -1094,14 +1094,39 @@ Three limits are worth stating plainly.
 **The exit skips the drain.** `-XX:+ExitOnOutOfMemoryError` halts the JVM without running
 shutdown hooks, so the §5 graceful-drain sequence does not run and in-flight requests are
 dropped — `terminationGracePeriodSeconds: 60` and `preStop: sleep 5` buy nothing on this path.
-Accepted deliberately: the alternative is a JVM in an unknown state, possibly with dead
-background threads, reporting itself live and serving indefinitely, and every serving Deployment
-runs multiple replicas behind a readiness-gated Service.
+Accepted deliberately, but the reason differs by workload and only one of the two reasons is
+about replicas:
+
+- **The four serving deployments** each run multiple replicas behind a readiness-gated Service
+  (gateway 2, catalog 2, model 3, online 2), so losing one replica's in-flight requests is a
+  partial failure of a service that is already failing.
+- **The outbox relay is `replicas: 1`**, so that argument does not apply to it at all. What
+  makes a hard exit safe there is the lease: `OUTBOX_RELAY_LEASE_SECONDS: "30"` bounds how long
+  rows claimed by the dead process stay unavailable, and `runOnce` claims-then-delivers, so an
+  exit mid-flight is at-least-once redelivery rather than loss. The reconciliation CronJob is
+  the same shape — `restartPolicy: Never` with `backoffLimit: 3` turns the exit into an ordinary
+  Job retry, and a reconciliation pass is idempotent.
+
+Two second-order effects on the CronJob are worth knowing rather than fixing:
+`activeDeadlineSeconds: 600` is wall-clock *across* retries, so an OOM late in a run eats the
+retry budget and the Job ends `DeadlineExceeded`; and `RECONCILIATION_LEASE_SECONDS: "300"`
+exceeds the Job's backoff intervals, so a retry can hit a still-held lease and skip exactly the
+events the dead run had claimed, exiting 0. Both are dormant today — `RECONCILIATION_REPAIR` is
+`"false"`, so no lease is taken.
 
 **It does not fire on every OOM-adjacent failure.** It triggers when the JVM throws
 `OutOfMemoryError`. A native allocation failure inside `onnxruntime` is a SIGSEGV that kills the
 process anyway (below), and a JVM merely thrashing GC without throwing is untouched — the heap
 and GC alerts remain the signal for that case.
+
+**In containers, this flag preempts the Error boundaries of §9.1–§9.4 for OOM specifically.**
+`GuardedLoop` advertises surviving an `OutOfMemoryError` raised on its thread so the next
+iteration runs, and `RedisFeatureVersionSampler` and `SplunkHecAppender` say the same. With the
+flag set the JVM exits at throw time, so that branch is unreachable under Kubernetes — it stays
+reachable for local runs, where `config/jvm/*.jvmopts` set `HeapDumpOnOutOfMemoryError` and
+never the exit flag. Those guards are not redundant: they still absorb every *other* `Error`,
+which is what they were written for. Read §9.3–§9.4 as "what happens to a non-fatal Error", and
+this section as "what happens to an OOM", rather than as two answers to one question.
 
 **The claim this section used to make about liveness was wrong for one service.** It said every
 liveness probe in the system was a constant `200 OK` that inspects nothing. That held for

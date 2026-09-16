@@ -375,15 +375,33 @@ for routes whose upstreams are fine — redundant with `GATEWAY_UPSTREAM_HEALTHC
 and the per-route circuit breakers, which degrade the affected route more precisely. Recorded
 as a decision so it is not later mistaken for the same bug.
 
-`/health/live` needs no `GATEWAY_PUBLIC_PATHS` entry and no origin-secret exemption of its own.
-Both gates match with the same prefix-with-boundary rule —
-`path.equals(p) || path.startsWith(p + "/")`, in `GatewayAuthenticator.matchesPrefix` and
-`GatewayOriginSecret.isExempt` — so the existing `/health` entry already covers it. That is
-load-bearing and invisible: tightening either match to exact equality would read as a hardening
-change and would break every gateway pod's liveness probe in the EKS overlays, where
-`GATEWAY_ALLOW_ANONYMOUS=false`. `GatewayLivenessRouteTest` pins it, along with the fact that
-the exact route still wins over the `prefix:/` catch-all that would otherwise proxy the probe to
-an upstream. `GatewayLivenessManifestTest` pins the probe wiring itself.
+`/health/live` needs no `GATEWAY_PUBLIC_PATHS` entry, and it is worth being precise about why,
+because the obvious explanation is the wrong one.
+
+**The authenticator never sees it.** `GatewayAuthenticator.check` is called from exactly three
+request-handling services — `GatewayProxyService`, `RecommendationGatewayService`,
+`LlmProxyService` — and is not a server-wide decorator. An exact route registered on the
+`ServerBuilder` bypasses it, which is why the pipeline table above lists these routes as running
+"before auth". So no public-path entry is needed, and tightening `matchesPrefix` would *not*
+break the probe.
+
+**The origin secret does see it, and that is the gate that matters.** `GatewayOriginSecret` is
+one of four server-wide decorators and the only one that can reject a request. It is enabled
+wherever the CDN is, and the kubelet reaches the pod directly with no `x-origin-secret` header.
+`/health/live` survives because `isExempt` matches by prefix-with-boundary —
+`path.equals(p) || path.startsWith(p + "/")` — so the existing `/health` entry covers it.
+Tightening that to exact equality reads as a hardening change, leaves every existing
+`GatewayOriginSecretTest` case green, and gives every gateway pod a 403 liveness probe:
+CrashLoopBackOff of the sole public entry point, with a green CI.
+`GatewayLivenessRouteTest.livenessPathIsExemptFromTheOriginSecret` is the assertion that stops
+that, verified by mutation.
+
+The same test class pins that the exact route beats the `prefix:/` catch-all. If it did not, the
+probe would get `404 "no route found"` — `routeTable.match("/health/live")` returns null, since
+every route prefix is `/api/...` — rather than being proxied to an upstream.
+`GatewayServerIntegrationTest` exercises the probe through the fully assembled decorator stack,
+and shares production's `registerHealthRoutes` seam rather than mirroring it, so the harness
+cannot drift. `GatewayLivenessManifestTest` pins the probe wiring in the manifests.
 
 ## 7. Metrics
 

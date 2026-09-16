@@ -100,8 +100,13 @@ class GatewayServerIntegrationTest {
                     name -> "GATEWAY_DEPRECATION_SUNSET".equals(name) ? "2027-07-27" : null)
                     .newDecorator());
 
-            sb.service("/health", new GatewayHealthService(routes, timeout, cbs, GATEWAY_SELF_PORT))
-              .service("/api/recommend", recommendationService)
+            // The same call production makes, not a hand-mirrored copy: if the real server
+            // stopped registering /health/live, the manifests would point livenessProbe at a
+            // path the gateway 404s, and this harness would go on passing.
+            MicroserviceGatewayServer.registerHealthRoutes(
+                    sb, new GatewayHealthService(routes, timeout, cbs, GATEWAY_SELF_PORT));
+
+            sb.service("/api/recommend", recommendationService)
               // Mirrors MicroserviceGatewayServer: the canonical endpoint is an exact Armeria
               // route, so the versioned spelling needs its own registration.
               .service("/api/v1/recommend", recommendationService)
@@ -140,6 +145,19 @@ class GatewayServerIntegrationTest {
             sb.service("prefix:/", new GatewayProxyService(routes, forwarder, auth));
         }
     };
+
+    /**
+     * The liveness probe, end to end through the assembled server: every server-wide decorator
+     * the real gateway installs, no credentials, no x-origin-secret. The unit test covers the
+     * handler and each gate in isolation; this is the one that would catch a decorator added
+     * later that rejects the probe before it reaches the route.
+     */
+    @Test
+    void livenessReturns200ThroughTheAssembledDecoratorStack() {
+        AggregatedHttpResponse r = gateway.blockingWebClient().get("/health/live");
+        assertThat(r.status()).isEqualTo(HttpStatus.OK);
+        assertThat(r.contentUtf8()).contains("\"live\":true");
+    }
 
     @Test
     void healthReturns200() {

@@ -1073,19 +1073,84 @@ in `isHeld()`; it does not use `GuardedLoop`.
 loop's own test pins its Error case, and `WatchdogLockTest`'s two new cases were run against the
 old code first (mutation check: both fail there).
 
-### 9.5 The process boundary: nothing turns an OOM into a restart
+### 9.5 The process boundary: an OOM now exits, and liveness answers one question
 
-With no `-XX:+ExitOnOutOfMemoryError` in any container `JAVA_OPTS`, a JVM that has thrown
-`OutOfMemoryError` keeps running. §9.2 shows request threads keep answering (500s while heap is
-short, 200s once GC recovers something), and every liveness probe in the system —
-`HealthController.liveness`, `OnlineServices.Live`, the gateway and relay `/health/live` — is a
-constant `200 OK` that inspects nothing, so Kubernetes never restarts the container. What the
-operator sees instead is `JvmHeapPressureHigh` and `JvmGcTimeFractionHigh` (§8.4) plus a
-climbing 5xx rate, and, per §9.4, possibly a background loop that quietly died at the same
-moment and will stay dead after the heap recovers. `-XX:+HeapDumpOnOutOfMemoryError` is set
-only in `config/jvm/*.jvmopts`, which containers do not read (they take `JAVA_OPTS`), and the
-container root filesystem is read-only with only `/tmp` writable — so a dump path would have
-to be `/tmp` explicitly.
+Until 2026-09 no container set `-XX:+ExitOnOutOfMemoryError`, so a JVM that had thrown
+`OutOfMemoryError` kept running. §9.2 shows request threads keep answering (500s while heap is
+short, 200s once GC recovers something), and, per §9.4, a background loop could die at the same
+moment and stay dead after the heap recovered. Nothing restarted the container; the operator saw
+`JvmHeapPressureHigh` and `JvmGcTimeFractionHigh` (§8.4) plus a climbing 5xx rate, and restarted
+the pod by hand.
+
+Every `k8s/base` workload now sets `-XX:+ExitOnOutOfMemoryError` — the four services, the outbox
+relay and the reconciliation CronJob — so an OOM becomes a process exit and a restart the
+platform already knows how to perform. `OomPolicyManifestTest` derives the workload set from the
+manifests rather than listing it, so a service added later without the flag fails the build, and
+pins that the `Dockerfile` entrypoint still expands `$JAVA_OPTS` unquoted: the flag and its
+delivery live in different files and neither fails on its own.
+
+Three limits are worth stating plainly.
+
+**The exit skips the drain.** `-XX:+ExitOnOutOfMemoryError` halts the JVM without running
+shutdown hooks, so the §5 graceful-drain sequence does not run and in-flight requests are
+dropped — `terminationGracePeriodSeconds: 60` and `preStop: sleep 5` buy nothing on this path.
+Accepted deliberately, but the reason differs by workload and only one of the two reasons is
+about replicas:
+
+- **The four serving deployments** each run multiple replicas behind a readiness-gated Service
+  (gateway 2, catalog 2, model 3, online 2), so losing one replica's in-flight requests is a
+  partial failure of a service that is already failing.
+- **The outbox relay is `replicas: 1`**, so that argument does not apply to it at all. What
+  makes a hard exit safe there is the lease: `OUTBOX_RELAY_LEASE_SECONDS: "30"` bounds how long
+  rows claimed by the dead process stay unavailable, and `runOnce` claims-then-delivers, so an
+  exit mid-flight is at-least-once redelivery rather than loss. The reconciliation CronJob is
+  the same shape — `restartPolicy: Never` with `backoffLimit: 3` turns the exit into an ordinary
+  Job retry, and a reconciliation pass is idempotent.
+
+Two second-order effects on the CronJob are worth knowing rather than fixing:
+`activeDeadlineSeconds: 600` is wall-clock *across* retries, so an OOM late in a run eats the
+retry budget and the Job ends `DeadlineExceeded`; and `RECONCILIATION_LEASE_SECONDS: "300"`
+exceeds the Job's backoff intervals, so a retry can hit a still-held lease and skip exactly the
+events the dead run had claimed, exiting 0. Both are dormant today — `RECONCILIATION_REPAIR` is
+`"false"`, so no lease is taken.
+
+**It does not fire on every OOM-adjacent failure.** It triggers when the JVM throws
+`OutOfMemoryError`. A native allocation failure inside `onnxruntime` is a SIGSEGV that kills the
+process anyway (below), and a JVM merely thrashing GC without throwing is untouched — the heap
+and GC alerts remain the signal for that case.
+
+**In containers, this flag preempts the Error boundaries of §9.1–§9.4 for OOM specifically.**
+`GuardedLoop` advertises surviving an `OutOfMemoryError` raised on its thread so the next
+iteration runs, and `RedisFeatureVersionSampler` and `SplunkHecAppender` say the same. With the
+flag set the JVM exits at throw time, so that branch is unreachable under Kubernetes — it stays
+reachable for local runs, where `config/jvm/*.jvmopts` set `HeapDumpOnOutOfMemoryError` and
+never the exit flag. Those guards are not redundant: they still absorb every *other* `Error`,
+which is what they were written for. Read §9.3–§9.4 as "what happens to a non-fatal Error", and
+this section as "what happens to an OOM", rather than as two answers to one question.
+
+**The claim this section used to make about liveness was wrong for one service.** It said every
+liveness probe in the system was a constant `200 OK` that inspects nothing. That held for
+`HealthController.liveness` (model serving), `OnlineServices.Live` (7010), the relay's
+`/health/live`, and catalog serving's `/health` (`RecommendationService.Health`, a constant
+`{"ok": true}` under an inconsistent name). It did not hold for the gateway:
+`k8s/base/api-gateway.yaml` pointed `livenessProbe`, `readinessProbe` **and** `startupProbe` at
+`/health`, which is `GatewayHealthService` — a 503 whenever any upstream is down. So the gateway
+had the opposite defect to the one this section describes: an upstream outage lasting past
+`20s × 3` restarted every gateway pod, discarding warm pools and circuit state on the one
+component still able to serve the routes whose upstreams were healthy, and a cold start whose
+upstreams took longer than the startup probe's `24 × 5s` budget killed the gateway before it
+ever started. Liveness and startup now target a constant-200 `/health/live`
+(`GatewayLivenessService`); readiness keeps `/health` by decision, since "should traffic come
+here" is a question upstream state legitimately answers. `GatewayLivenessManifestTest` enforces
+that split and, generally, that no liveness path in `k8s/base` is outside the allow-list of
+known constant-200 handlers.
+
+Heap dumps were considered and not added. `-XX:+HeapDumpOnOutOfMemoryError` is set only in
+`config/jvm/*.jvmopts`, which containers do not read (they take `JAVA_OPTS`), and the container
+root filesystem is read-only with only an `emptyDir` `/tmp` writable — so a dump from model
+serving's 2 GiB heap would land on ephemeral storage, vanish with the pod, and risk pressuring
+the node into a disk-eviction while the workload is already degraded. Dumps need a persistent
+volume and a retention story before they are worth enabling.
 
 The ONNX native layer is the other process-level case and behaves differently from all of the
 above: a fault inside `onnxruntime` is a SIGSEGV, not a Java `Error`. No `catch` sees it; the
@@ -1105,11 +1170,12 @@ code can observe, and it is handled at every call site.
   lease deadline on `isHeld()`. `ServiceRegistrar`/`ServiceRegistryProvider` keep their
   `catch (Exception)` because their failure is already externally visible (§9.4);
   `CapacityController` is not started in production.
-- **Process:** decide the OOM policy explicitly. For a stateless replica behind a readiness
-  probe, `-XX:+ExitOnOutOfMemoryError` in the container `JAVA_OPTS` turns "a JVM in an unknown
-  state, with some threads dead, reporting live" into a restart the platform already handles.
-  Not done in this change either — it is a deployment policy, and it interacts with the
-  §5 drain sequence (an exit skips it).
+- **Process:** the OOM policy is now decided. Every `k8s/base` workload sets
+  `-XX:+ExitOnOutOfMemoryError`, turning "a JVM in an unknown state, with some threads dead,
+  reporting live" into a restart the platform already handles. The cost is the §5 drain: an
+  exit skips it, and that was accepted rather than avoided (§9.5). The same change corrected
+  this section's liveness claim, which was wrong for the gateway — its liveness and startup
+  probes were wired to the upstream-aware `/health` and now target `/health/live`.
 
 ## Sharp edges — status
 
@@ -1154,7 +1220,11 @@ code can observe, and it is handled at every call site.
   read at scrape time rather than written by the loop. `ServiceRegistrar` and
   `ServiceRegistryProvider` still use `catch (Exception)` deliberately: their failure is
   visible without a guard (registry key expiry, `GatewayRegistryStale`).
-- **No OOM policy: the JVM survives `OutOfMemoryError` and liveness stays `200`** (§9.5). No
-  container sets `-XX:+ExitOnOutOfMemoryError`, and every `/health/live` is a constant UP, so a
-  JVM with dead background threads is never restarted by the platform; only the heap/GC alerts
-  and the 5xx rate show it.
+- **OOM policy: resolved, with two accepted residuals** (§9.5). Every `k8s/base` workload sets
+  `-XX:+ExitOnOutOfMemoryError`, so an OOM'd JVM exits and is restarted instead of serving on
+  with dead background threads. Residual one: the exit skips the §5 drain, dropping in-flight
+  requests, which is the better of the two bad outcomes on a replica that is already failing.
+  Residual two: the gateway's *readiness* probe stays coupled to upstream health, so one
+  upstream down still pulls the gateway from its target group even though
+  `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED` and the per-route circuit breakers already degrade
+  that route more precisely. Left by decision, not oversight.

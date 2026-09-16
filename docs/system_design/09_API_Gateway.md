@@ -21,7 +21,7 @@ A request traverses a deliberate pipeline. Some stages are Armeria server decora
 
 | Stage | Where | Effect |
 |---|---|---|
-| `/metrics`, `/health` | server routes | Prometheus + health aggregation, before auth |
+| `/metrics`, `/health`, `/health/live` | server routes | Prometheus, health aggregation, liveness; before auth |
 | **Origin secret** | server decorator | Reject non-CDN traffic `403` (only when enabled) |
 | Route match | `MicroserviceRouteTable` | Longest-prefix; LLM + `/api/recommend` win over catch-all |
 | **Auth** | inside `GatewayProxyService.serve` | Edge auth → principal, or `401` |
@@ -349,6 +349,59 @@ report UP while data requests failed with `no healthy endpoint`. Diagnose that
 mismatch using probe logs and the deployed version; do not infer endpoint
 selectability from the aggregation alone. `GatewayUpstreamHealthCheckIntegrationTest`
 uses a GET-only upstream to guard this behavior and runs in the resilience gate.
+
+### Liveness is a different question from readiness
+
+`GET /health/live`
+([`GatewayLivenessService`](../../src/main/java/com/recsys/application/gateway/GatewayLivenessService.java))
+is a constant `200` that consults nothing. It exists because `/health` above cannot serve as a
+liveness probe: it returns `503` whenever any upstream is down, and to kubelet a failing
+liveness probe means *kill this container*.
+
+The gateway had all three probes on `/health` until 2026-09. The consequences were real in both
+directions:
+
+- **Liveness** (`20s × 3`): an upstream outage of about a minute restarted every gateway pod —
+  discarding warm connection pools and circuit state on the one component still able to serve
+  the routes whose upstreams were healthy.
+- **Startup** (`5s × 24`): a cold start whose upstreams took longer than 120 s to boot — a DR
+  region coming up, a full-namespace restart — killed the gateway before it ever started, and
+  it restarted into the same condition.
+
+Liveness and startup now target `/health/live`. **Readiness deliberately keeps `/health`**: "is
+this pod fit to receive traffic" is a question upstream state legitimately answers. The accepted
+cost is that one upstream being down pulls the gateway out of its target group entirely, even
+for routes whose upstreams are fine — redundant with `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED`
+and the per-route circuit breakers, which degrade the affected route more precisely. Recorded
+as a decision so it is not later mistaken for the same bug.
+
+`/health/live` needs no `GATEWAY_PUBLIC_PATHS` entry, and it is worth being precise about why,
+because the obvious explanation is the wrong one.
+
+**The authenticator never sees it.** `GatewayAuthenticator.check` is called from exactly three
+request-handling services — `GatewayProxyService`, `RecommendationGatewayService`,
+`LlmProxyService` — and is not a server-wide decorator. An exact route registered on the
+`ServerBuilder` bypasses it, which is why the pipeline table above lists these routes as running
+"before auth". So no public-path entry is needed, and tightening `matchesPrefix` would *not*
+break the probe.
+
+**The origin secret does see it, and that is the gate that matters.** `GatewayOriginSecret` is
+one of four server-wide decorators and the only one that can reject a request. It is enabled
+wherever the CDN is, and the kubelet reaches the pod directly with no `x-origin-secret` header.
+`/health/live` survives because `isExempt` matches by prefix-with-boundary —
+`path.equals(p) || path.startsWith(p + "/")` — so the existing `/health` entry covers it.
+Tightening that to exact equality reads as a hardening change, leaves every existing
+`GatewayOriginSecretTest` case green, and gives every gateway pod a 403 liveness probe:
+CrashLoopBackOff of the sole public entry point, with a green CI.
+`GatewayLivenessRouteTest.livenessPathIsExemptFromTheOriginSecret` is the assertion that stops
+that, verified by mutation.
+
+The same test class pins that the exact route beats the `prefix:/` catch-all. If it did not, the
+probe would get `404 "no route found"` — `routeTable.match("/health/live")` returns null, since
+every route prefix is `/api/...` — rather than being proxied to an upstream.
+`GatewayServerIntegrationTest` exercises the probe through the fully assembled decorator stack,
+and shares production's `registerHealthRoutes` seam rather than mirroring it, so the harness
+cannot drift. `GatewayLivenessManifestTest` pins the probe wiring in the manifests.
 
 ## 7. Metrics
 

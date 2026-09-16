@@ -94,8 +94,11 @@ spec:
               value: "100"
             - name: REDIS_TIMEOUT_MS
               value: "200"
+            # -XX:+ExitOnOutOfMemoryError: an OOM'd JVM keeps serving (500s, then 200s once GC
+            # recovers) with no liveness probe that notices, so nothing restarts it. Exiting
+            # skips the graceful drain deliberately — see 18_Fault_Tolerance.md §9.5.
             - name: JAVA_OPTS
-              value: "-Xms512m -Xmx1g"
+              value: "-Xms512m -Xmx1g -XX:+ExitOnOutOfMemoryError"
             # Splunk HEC log shipping. Inert until the recsys-splunk Secret exists, so
             # optional: true keeps pods schedulable before it is provisioned — same pattern
             # as recsys-online-admin / SHARD_ADMIN_TOKEN. See

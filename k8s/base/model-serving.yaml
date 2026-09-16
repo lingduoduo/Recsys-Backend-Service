@@ -57,8 +57,11 @@ spec:
               value: com.recsys.api.rest.ModelApplication
             - name: SERVER_PORT
               value: "8080"
+            # -XX:+ExitOnOutOfMemoryError: an OOM'd JVM keeps serving (500s, then 200s once GC
+            # recovers) with no liveness probe that notices, so nothing restarts it. Exiting
+            # skips the graceful drain deliberately — see 18_Fault_Tolerance.md §9.5.
             - name: JAVA_OPTS
-              value: "-Xms1g -Xmx2g -XX:MaxDirectMemorySize=512m"
+              value: "-Xms1g -Xmx2g -XX:MaxDirectMemorySize=512m -XX:+ExitOnOutOfMemoryError"
             - name: MANAGEMENT_ENDPOINTS_EXPOSURE
               value: "health,info,prometheus"
             # ONNX Runtime native parallelism, stated explicitly rather than inherited. One

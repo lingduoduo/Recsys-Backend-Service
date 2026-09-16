@@ -30,7 +30,7 @@ class ModelReloadControllerTest {
 
     @Test
     void reloadReturnsOk() throws Exception {
-        mvc.perform(post("/actuator/model-reload"))
+        mvc.perform(post("/api/v1/retrieval/model/reload"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ok"));
     }

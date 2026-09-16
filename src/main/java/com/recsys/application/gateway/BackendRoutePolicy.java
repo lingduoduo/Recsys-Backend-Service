@@ -108,7 +108,19 @@ final class BackendRoutePolicy {
                     Map.entry("/health/load", of(Access.NO_PROXY)),
                     Map.entry("/health/cache", of(Access.NO_PROXY)),
                     Map.entry("/health/ab-tests", of(Access.NO_PROXY)),
-                    Map.entry("/health/ready", of(Access.NO_PROXY))));
+                    Map.entry("/health/ready", of(Access.NO_PROXY)),
+                    // The /api/v1/retrieval surface. Only the paths with no template segment can
+                    // be spelled exactly; the other four live in PREFIX below.
+                    Map.entry("/api/v1/retrieval/predict/id", of(Access.AUTHENTICATED)),
+                    Map.entry("/api/v1/retrieval/predict/metadata", of(Access.AUTHENTICATED)),
+                    Map.entry("/api/v1/retrieval/feedback", userScoped(UserIdSource.BODY)),
+                    Map.entry("/api/v1/retrieval/metrics", of(Access.NO_PROXY)),
+                    // Reloads the live ONNX session — the same class of mutation as
+                    // /api/v1/model/versions/activate, and it arrived from the retrieval drop-in
+                    // with no authorization at all. It used to sit under /actuator, which this
+                    // table already refuses to proxy, so moving it out and leaving it
+                    // unclassified would have made it *more* reachable, not less.
+                    Map.entry("/api/v1/retrieval/model/reload", of(Access.OPERATOR))));
 
     /**
      * The paths that cannot be enumerated as exact strings, so the only ones matched by prefix.
@@ -139,7 +151,31 @@ final class BackendRoutePolicy {
     private static final Map<String, Map<String, Policy>> PREFIX = Map.of(
             "recsys-model-serving", Map.of(
                     "/actuator", of(Access.NO_PROXY),
-                    "/api/v1/knowledge-bases", of(Access.AUTHENTICATED)),
+                    "/api/v1/knowledge-bases", of(Access.AUTHENTICATED),
+                    // Path templates, not paths, for the same reason as /api/v1/knowledge-bases:
+                    // "/api/v1/retrieval/recommend/{user}" declared exactly would match only the
+                    // literal the route scanner emits and that no client ever sends, 404ing every
+                    // real id while both coverage tests stayed green. None of these four may also
+                    // appear in EXACT — exact wins the lookup, which would kill the prefix branch,
+                    // and noPrefixEntryShadowsADeclaredExactPath fails on it.
+                    //
+                    // The userId is a path segment on all three user routes, hence
+                    // UserIdSource.PATH: AUTHENTICATED here would let any authenticated caller
+                    // read another user's profile by editing the path.
+                    //
+                    // /api/v1/retrieval/predict sits above the exact /predict/id and
+                    // /predict/metadata entries, which name no user. Exact is tried first, so
+                    // those two still resolve AUTHENTICATED; the prefix governs
+                    // /predict/{user}/{item} alone.
+                    "/api/v1/retrieval/recommend", userScoped(UserIdSource.PATH),
+                    "/api/v1/retrieval/predict", userScoped(UserIdSource.PATH),
+                    "/api/v1/retrieval/users", userScoped(UserIdSource.PATH),
+                    // Item embeddings, not user data — the same tier as catalog serving's /item
+                    // and /similar. Named here rather than exactly because /embedding/{item} is
+                    // a template too.
+                    "/api/v1/retrieval/embedding", of(Access.AUTHENTICATED),
+                    // Operator tooling: walks every user's profile and preferences.
+                    "/api/v1/retrieval/profile-audit", of(Access.OPERATOR)),
             "recsys-online-serving", Map.of("/shards", of(Access.AUTHENTICATED)));
 
     private BackendRoutePolicy() {}

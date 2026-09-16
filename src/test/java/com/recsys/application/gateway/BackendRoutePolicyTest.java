@@ -219,4 +219,59 @@ class BackendRoutePolicyTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.AUTHENTICATED, UserIdSource.QUERY));
     }
+
+    // ---- the retrieval surface (/api/v1/retrieval) ----------------------------------------
+
+    @Test
+    void classifiesRetrievalModelReloadAsOperator() {
+        // It reloads the live ONNX session for everyone — the same class of mutation as
+        // /api/v1/model/versions/activate, and it arrived with no authorization at all.
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.OPERATOR, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/model/reload"));
+    }
+
+    @Test
+    void classifiesProfileAuditAndItsPerUserPathAsOperator() {
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.OPERATOR, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/profile-audit"));
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.OPERATOR, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/profile-audit/123"));
+    }
+
+    @Test
+    void scopesTheRetrievalUserRoutesToTheCallersOwnUserId() {
+        assertEquals(new BackendRoutePolicy.Policy(
+                        BackendRoutePolicy.Access.USER_SCOPED, UserIdSource.PATH),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/recommend/123"));
+        assertEquals(new BackendRoutePolicy.Policy(
+                        BackendRoutePolicy.Access.USER_SCOPED, UserIdSource.PATH),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/users/123/profile"));
+        assertEquals(new BackendRoutePolicy.Policy(
+                        BackendRoutePolicy.Access.USER_SCOPED, UserIdSource.PATH),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/predict/123/456"));
+    }
+
+    @Test
+    void theRetrievalPredictPrefixDoesNotSwallowItsTwoExactSiblings() {
+        // Exact is tried before prefix, so /predict/id and /predict/metadata keep their own
+        // classification even though /api/v1/retrieval/predict is a USER_SCOPED prefix. Neither
+        // names a user, so USER_SCOPED would deny every call to them.
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.AUTHENTICATED, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/predict/id"));
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.AUTHENTICATED, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/predict/metadata"));
+    }
+
+    @Test
+    void classifiesTheRemainingRetrievalRoutes() {
+        assertEquals(new BackendRoutePolicy.Policy(
+                        BackendRoutePolicy.Access.USER_SCOPED, UserIdSource.BODY),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/feedback"));
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.AUTHENTICATED, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/embedding/item1"));
+        // Serving telemetry, not a data path: reachable on the pod only, like every other
+        // /metrics in this table.
+        assertEquals(new BackendRoutePolicy.Policy(BackendRoutePolicy.Access.NO_PROXY, null),
+                BackendRoutePolicy.lookup("recsys-model-serving", "/api/v1/retrieval/metrics"));
+    }
 }

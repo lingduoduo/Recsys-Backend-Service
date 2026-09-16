@@ -488,7 +488,7 @@ public class RecommendationProperties {
         }
     }
 
-    /** GET /actuator/profile-audit: bounds on how much work one call may do. */
+    /** GET /api/v1/retrieval/profile-audit: bounds on how much work one call may do. */
     public static class ProfileAudit {
         /** SCAN pattern for level 0; the user id is the second ':'-separated segment. */
         @NotBlank

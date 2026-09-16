@@ -18,7 +18,7 @@ public class ModelReloadController {
         this.predictionService = predictionService;
     }
 
-    @PostMapping("/actuator/model-reload")
+    @PostMapping("/api/v1/retrieval/model/reload")
     public Map<String, String> reload() {
         try {
             predictionService.reload();

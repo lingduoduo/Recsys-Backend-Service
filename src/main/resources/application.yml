@@ -195,7 +195,7 @@ recsys:
       # vector. This is what gives the Kafka stream and the Redis replay buffer one requestId
       # namespace; offline DPO cannot join without it.
       emit-events: ${RECSYS_GRPO_EMIT_EVENTS:false}
-    # GET /actuator/profile-audit — operator tool; one audit at a time, bounded by max-users.
+    # GET /api/v1/retrieval/profile-audit — operator tool; one audit at a time, bounded by max-users.
     profile-audit:
       user-key-pattern: ${RECSYS_PROFILE_AUDIT_USER_KEY_PATTERN:user:*:features}
       max-users: ${RECSYS_PROFILE_AUDIT_MAX_USERS:10000}

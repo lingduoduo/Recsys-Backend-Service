@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import java.util.List;
 import java.util.Map;
 
-/** Response of GET /actuator/profile-audit. Null fields are omitted from JSON. */
+/** Response of GET /api/v1/retrieval/profile-audit. Null fields are omitted from JSON. */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({"status", "active_run", "generated_at", "elapsed_ms", "truncated", "summary", "users"})
 public record ProfileAuditReport(

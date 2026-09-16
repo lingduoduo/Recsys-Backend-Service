@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * Operator tool, like /actuator/model-reload: walks user → has_profile → preferences → catalog
+ * Operator tool, like /api/v1/retrieval/model/reload: walks user → has_profile → preferences → catalog
  * content and returns a findings-only report. Records no serving measurement.
  */
 @RestController
@@ -34,7 +34,7 @@ public class ProfileAuditController {
         this.auditService = auditService;
     }
 
-    @GetMapping("/actuator/profile-audit")
+    @GetMapping("/api/v1/retrieval/profile-audit")
     public ResponseEntity<?> audit(@RequestParam(required = false) Integer limit) {
         try {
             return ResponseEntity.ok(auditService.audit(limit));
@@ -49,7 +49,7 @@ public class ProfileAuditController {
         }
     }
 
-    @GetMapping("/actuator/profile-audit/{user}")
+    @GetMapping("/api/v1/retrieval/profile-audit/{user}")
     public ResponseEntity<?> auditAccount(
         @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
     ) {

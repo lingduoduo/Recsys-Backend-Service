@@ -64,6 +64,13 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
+          <!-- Spring MVC binds @PathVariable/@RequestParam by parameter name when no explicit
+               name is given, which requires javac -parameters. Projects that inherit
+               spring-boot-starter-parent get this for free; this pom declares its Spring
+               dependencies explicitly and has no parent, so it must set the flag itself.
+               Without it, implicit-binding controllers fail at request time with
+               IllegalArgumentException, not at compile time. -->
+          <parameters>true</parameters>
           <excludes>
             <exclude>com/recsys/training/embedding/**</exclude>
             <exclude>com/recsys/online/flink/**</exclude>

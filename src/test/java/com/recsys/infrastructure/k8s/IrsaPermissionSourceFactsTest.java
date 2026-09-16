@@ -105,7 +105,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li><strong>Anything outside {@code src/main/java}.</strong> Test sources are not scanned, which is
  *       intended: a fake or a test-only client needs no IAM. But neither is anything else — a
  *       {@code scripts/} helper, a sibling repo, an IaC template. Note that {@code online/flink/} and
- *       {@code training/rulebased/} <em>are</em> scanned: they are excluded from the Maven compile, not
+ *       {@code training/embedding/} <em>are</em> scanned: they are excluded from the Maven compile, not
  *       from {@code src/main/java}, and {@code Files.walk} reads them like any other directory.
  * </ul>
  *

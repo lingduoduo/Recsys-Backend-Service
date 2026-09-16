@@ -1,4 +1,4 @@
-package com.recsys.training.rulebased;
+package com.recsys.training.embedding;
 
 import org.apache.spark.ml.feature.BucketedRandomProjectionLSH;
 import org.apache.spark.ml.feature.BucketedRandomProjectionLSHModel;
@@ -36,6 +36,10 @@ import static org.apache.spark.sql.functions.size;
 import static org.apache.spark.sql.functions.struct;
 import static org.apache.spark.sql.functions.udf;
 
+/**
+ * Learns item embeddings from movie interaction sequences for similarity retrieval.
+ * Word2Vec captures behavioral co-occurrence rather than movie-text similarity.
+ */
 public class ItemEmbeddingJob {
     private static final String RATINGS_RESOURCE = "/com/recsys/data/ratings.txt";
     private static final String DEFAULT_OUTPUT_PATH = "output/item_embeddings";

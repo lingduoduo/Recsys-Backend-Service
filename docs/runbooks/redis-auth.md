@@ -256,7 +256,7 @@ else in this section: nothing here knows where these jobs run. Until that is kno
 `default` would break them silently.
 
 Neither call site is exercised by any build in this repository — `online/flink/` and
-`training/rulebased/` are excluded from the Maven compile, so `mvn package` and the `resilience`
+`training/embedding/` are excluded from the Maven compile, so `mvn package` and the `resilience`
 gate never compile them. `StreamingRedisUri` and its tests are in the compiled tree and do gate;
 the two lines that call it do not. They compile only under the opt-in `-Pstreaming-flink` and
 `-Poffline-embedding` profiles, which CI does not run.

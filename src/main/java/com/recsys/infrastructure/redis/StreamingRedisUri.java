@@ -5,7 +5,7 @@ import io.lettuce.core.RedisURI;
 /**
  * Builds a Redis URI for the Flink and Spark jobs, on the same terms as every service.
  *
- * <p>Those jobs live in {@code online/flink/} and {@code training/rulebased/}, which are excluded
+ * <p>Those jobs live in {@code online/flink/} and {@code training/embedding/}, which are excluded
  * from the Maven compile because they need Flink and Spark classpaths. Nothing there can be
  * compiled, tested, or made to fail a build — so the decision about what a Redis URI should look
  * like lives here instead, and each job calls this in one line.

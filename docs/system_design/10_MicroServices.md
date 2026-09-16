@@ -110,7 +110,7 @@ The economy of one codebase shows up as genuinely shared building blocks:
 - **Infrastructure adapters are shared** — `RedisEmbeddingStore`,
   `LettuceClientFactory`, `ShardedTopKStore`, the caches — reused across servers,
   with only the concrete cache class differing (serving vs online).
-- **Excluded from the compile** — `online/flink/**` and `training/rulebased/**` need
+- **Excluded from the compile** — `online/flink/**` and `training/embedding/**` need
   Spark/Flink classpaths, so [`pom.xml`](../../pom.xml) excludes them from the default
   `maven-compiler-plugin` run (re-included only via the `streaming-flink` / Spark
   profiles). They live outside the layer scheme deliberately.
@@ -211,7 +211,7 @@ compile-excludes rather than an automated rule.
    at JVM start with a class-not-found, not a friendly error — the k8s manifests are
    the source of truth for the correct value per service.
 4. **Two source trees are outside the build.** `online/flink/**` and
-   `training/rulebased/**` exist in the repo but are excluded from the default compile;
+   `training/embedding/**` exist in the repo but are excluded from the default compile;
    edits there are only validated under the Spark/Flink Maven profiles.
 5. **The gateway is a shared fate.** Independent backends still funnel through one
    edge, so gateway availability is covered separately —

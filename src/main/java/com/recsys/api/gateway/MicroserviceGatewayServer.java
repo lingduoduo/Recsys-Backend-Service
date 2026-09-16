@@ -7,6 +7,7 @@ import com.recsys.application.gateway.GatewayProxyService;
 import com.recsys.application.gateway.GatewayRequestForwarder;
 import com.recsys.application.gateway.LlmProxyService;
 import com.recsys.application.gateway.GatewayHealthService;
+import com.recsys.application.gateway.GatewayLivenessService;
 import com.recsys.application.gateway.GatewayAuthenticator;
 import com.recsys.application.gateway.GatewayOriginSecret;
 import com.recsys.application.gateway.MicroserviceRoute;
@@ -211,6 +212,14 @@ public final class MicroserviceGatewayServer {
 
         // Health endpoint — exposes per-route circuit state and upstream reachability.
         sb.service("/health", new GatewayHealthService(allRoutes, timeout, circuitBreakers, port, registryProvider));
+
+        // Liveness — process viability only, never upstream state. /health answers 503 when an
+        // upstream is down, which is correct for readiness and wrong for liveness: it would make
+        // kubelet restart every gateway pod during an upstream outage, discarding warm pools and
+        // circuit state on the one component still able to serve the healthy routes. It needs no
+        // GATEWAY_PUBLIC_PATHS entry: both GatewayAuthenticator and GatewayOriginSecret match by
+        // prefix-with-boundary, so the existing "/health" entry covers it. See 09_API_Gateway.md.
+        sb.service("/health/live", new GatewayLivenessService());
 
         // LLM path: build a tuned, shared ClientFactory (only when LLM routes exist) and register
         // each LLM route from it. Register LLM routes before the catch-all so Armeria's

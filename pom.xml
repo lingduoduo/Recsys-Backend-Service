@@ -335,6 +335,13 @@
                 <include>**/resilience/*Test.java</include>
                 <include>**/loadshed/*Test.java</include>
                 <include>**/gateway/UpstreamEndpointGroupsTest.java</include>
+                <!-- Liveness must not depend on upstreams, or an upstream outage restarts every
+                     gateway pod. Also pins two things that hold only by accident of other code:
+                     /health/live stays anonymously reachable (it is public via prefix matching on
+                     the "/health" entry, so tightening that match would break the probe in
+                     production), and the exact route still beats the prefix:/ catch-all, which
+                     would otherwise proxy the probe to the very upstream it must not depend on. -->
+                <include>**/gateway/GatewayLivenessRouteTest.java</include>
                 <include>**/gateway/GatewayUpstreamHealthCheckIntegrationTest.java</include>
                 <include>**/ratelimit/RedisRateLimiterTest.java</include>
                 <include>**/retrieval/multichannel/*DegradationTest.java</include>

@@ -70,16 +70,71 @@ public class RetrievalRedisConfig {
         return new LettuceConnectionFactory(standalone, client.build());
     }
 
+    private static final int DEFAULT_SENTINEL_PORT = 26379;
+    private static final int MIN_PORT = 1;
+    private static final int MAX_PORT = 65535;
+
     /**
-     * Mirrors {@code LettuceClientFactory.sentinelUri}'s handling of a colon-less sentinel node:
-     * that path silently defaults such an entry to port 26379, but
-     * {@code RedisSentinelConfiguration} (via {@code RedisNode.fromString}) throws on the same
-     * input. Without this, one {@code recsys.redis.sentinel-nodes} value would behave two
-     * different ways inside the same JVM — the raw-Lettuce path guessing, this path failing
-     * Spring context startup.
+     * Normalizes one {@code recsys.redis.sentinel-nodes} entry, matching
+     * {@code LettuceClientFactory.sentinelUri}'s handling of a bare hostname (no colon at all):
+     * that path silently defaults such an entry to port 26379, and so does this one — without
+     * it, {@code RedisSentinelConfiguration} (via {@code RedisNode.fromString}) would throw on
+     * the same input the raw-Lettuce path accepts.
+     *
+     * <p>What this deliberately does <b>not</b> mirror is {@code LettuceClientFactory.parsePort}'s
+     * fallback to port 6379 on an unparseable port string. 6379 is the Redis <em>data</em> port;
+     * silently pointing a sentinel client at it instead of 26379 is a latent bug in the
+     * raw-Lettuce path (visible even within {@code sentinelUri} itself, which uses 26379 for the
+     * colon-less case but would fall through to 6379 for something like {@code "sentinel-a:"}),
+     * and new code should not copy it. Sentinel is a live deployment mode — see
+     * {@code k8s/eks-shared/network-policy-elasticache-patch.yaml} — so a malformed entry here
+     * fails loudly, with a message naming the property and the offending value, instead of
+     * either guessing wrong or throwing a generic "Unparseable port number" from deep inside
+     * Spring Data.
      */
     private static String withDefaultSentinelPort(String node) {
-        return node.lastIndexOf(':') > 0 ? node : node + ":26379";
+        if (isBracketedHostWithPort(node)) {
+            return node;
+        }
+
+        int colonCount = (int) node.chars().filter(c -> c == ':').count();
+        if (colonCount == 0) {
+            return node + ":" + DEFAULT_SENTINEL_PORT;
+        }
+        if (colonCount > 1) {
+            throw malformedSentinelNode(node);
+        }
+
+        String portPart = node.substring(node.lastIndexOf(':') + 1);
+        if (!isValidPort(portPart)) {
+            throw malformedSentinelNode(node);
+        }
+        return node;
+    }
+
+    /** {@code RedisNode.fromString}'s bracketed-IPv6-with-port form, e.g. {@code [fe80::1]:26379}. */
+    private static boolean isBracketedHostWithPort(String node) {
+        if (!node.startsWith("[")) return false;
+        int close = node.indexOf(']');
+        if (close < 0 || close + 1 >= node.length() || node.charAt(close + 1) != ':') return false;
+        return isValidPort(node.substring(close + 2));
+    }
+
+    private static boolean isValidPort(String portPart) {
+        if (portPart.isEmpty()) return false;
+        try {
+            int port = Integer.parseInt(portPart);
+            return port >= MIN_PORT && port <= MAX_PORT;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static IllegalArgumentException malformedSentinelNode(String node) {
+        return new IllegalArgumentException(
+                "recsys.redis.sentinel-nodes has a malformed entry: '" + node + "'. Each entry "
+                        + "must be either a bare host (defaults to port " + DEFAULT_SENTINEL_PORT
+                        + ") or host:port with a port between " + MIN_PORT + " and " + MAX_PORT + ".");
     }
 
     private static void applyCredentials(WithPassword config, RedisProperties props) {

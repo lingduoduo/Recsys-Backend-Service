@@ -90,4 +90,68 @@ class RetrievalRedisConfigTest {
                 org.assertj.core.groups.Tuple.tuple("sentinel-a", 26380),
                 org.assertj.core.groups.Tuple.tuple("sentinel-b", 26379));
     }
+
+    /**
+     * LettuceClientFactory.parsePort falls back to 6379 (the Redis data port, not the sentinel
+     * port) on an unparseable port string, which would silently misdirect a sentinel client.
+     * The bridge deliberately does not mirror that fallback: a trailing-colon entry like this
+     * one must be rejected outright, with a message that names the property and the offending
+     * value rather than a generic failure from inside Spring Data.
+     */
+    @Test
+    void rejectsASentinelNodeWithATrailingColonAndNoPort() {
+        RedisProperties props = standalone();
+        props.setMode("sentinel");
+        props.setSentinelMaster("mymaster");
+        props.setSentinelNodes("sentinel-a:");
+
+        assertThatThrownBy(() -> RetrievalRedisConfig.connectionFactory(props, Map.of()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("recsys.redis.sentinel-nodes")
+            .hasMessageContaining("sentinel-a:");
+    }
+
+    @Test
+    void rejectsASentinelNodeWithANonNumericPort() {
+        RedisProperties props = standalone();
+        props.setMode("sentinel");
+        props.setSentinelMaster("mymaster");
+        props.setSentinelNodes("sentinel-a:abc");
+
+        assertThatThrownBy(() -> RetrievalRedisConfig.connectionFactory(props, Map.of()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("recsys.redis.sentinel-nodes")
+            .hasMessageContaining("sentinel-a:abc");
+    }
+
+    @Test
+    void rejectsASentinelNodeWithAnOutOfRangePort() {
+        RedisProperties props = standalone();
+        props.setMode("sentinel");
+        props.setSentinelMaster("mymaster");
+        props.setSentinelNodes("sentinel-a:70000");
+
+        assertThatThrownBy(() -> RetrievalRedisConfig.connectionFactory(props, Map.of()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("recsys.redis.sentinel-nodes")
+            .hasMessageContaining("sentinel-a:70000");
+    }
+
+    /**
+     * A bare, unbracketed IPv6 literal has more than one colon and no port segment.
+     * LettuceClientFactory.sentinelUri would mangle this into host "fe80:" port "1" via its own
+     * lastIndexOf(':') split; the bridge rejects it instead of reproducing that mangling.
+     */
+    @Test
+    void rejectsABareUnbracketedIpv6Literal() {
+        RedisProperties props = standalone();
+        props.setMode("sentinel");
+        props.setSentinelMaster("mymaster");
+        props.setSentinelNodes("fe80::1");
+
+        assertThatThrownBy(() -> RetrievalRedisConfig.connectionFactory(props, Map.of()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("recsys.redis.sentinel-nodes")
+            .hasMessageContaining("fe80::1");
+    }
 }

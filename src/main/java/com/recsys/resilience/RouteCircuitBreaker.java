@@ -55,4 +55,13 @@ public final class RouteCircuitBreaker {
     public void recordFailure(Permit permit) {
         delegate.recordFailure(permit.delegate());
     }
+
+    /**
+     * Settles a permit neutrally, for a request that ended with no evidence about upstream
+     * health — a client that cancelled or aborted mid-response. Frees a half-open probe slot
+     * without counting for or against the route. See {@link CircuitBreaker#releasePermit}.
+     */
+    public void releasePermit(Permit permit) {
+        delegate.releasePermit(permit.delegate());
+    }
 }

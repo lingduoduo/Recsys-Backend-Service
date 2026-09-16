@@ -336,22 +336,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
         RequestHeaders upstreamHeaders = buildUpstreamHeaders(request.headers(), targetPath, ctx, principal);
         HttpRequest upstreamReq = HttpRequest.of(upstreamHeaders, request.content());
         HttpResponse upstream = client.execute(upstreamReq);
-        return HttpResponse.of(upstream.aggregate()
-                .thenApply(aggResp -> {
-                    if (cb != null) {
-                        if (aggResp.status().isServerError()) cb.recordFailure(permit);
-                        else cb.recordSuccess(permit);
-                    }
-                    return aggResp.toHttpResponse();
-                })
-                .exceptionally(t -> {
-                    if (cb != null) cb.recordFailure(permit);
-                    if (isNoHealthyEndpoint(t)) {
-                        return GatewayProxyService.gatewayError(HttpStatus.SERVICE_UNAVAILABLE,
-                                route.name() + " upstream unavailable — no healthy endpoint");
-                    }
-                    return GatewayProxyService.gatewayError(HttpStatus.BAD_GATEWAY, "upstream unreachable");
-                }));
+        return GatewayUpstreamResponse.relay(upstream, cb, permit, route.name());
     }
 
     static RequestHeaders buildUpstreamHeaders(RequestHeaders incoming, String targetPath,
@@ -380,19 +365,6 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
             b.set(HttpHeaderNames.of("x-forwarded-for"), newValue);
         }
         return b.build();
-    }
-
-    // True when the upstream call failed because no healthy endpoint could be selected — either the group
-    // was empty (EmptyEndpointGroupException) or selection timed out waiting for one
-    // (EndpointSelectionTimeoutException). Both mean "upstream unavailable", surfaced to clients as 503.
-    private static boolean isNoHealthyEndpoint(Throwable t) {
-        for (Throwable c = t; c != null; c = c.getCause()) {
-            if (c instanceof com.linecorp.armeria.client.endpoint.EmptyEndpointGroupException
-                    || c instanceof com.linecorp.armeria.client.endpoint.EndpointSelectionTimeoutException) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static boolean isHopByHop(String name) {

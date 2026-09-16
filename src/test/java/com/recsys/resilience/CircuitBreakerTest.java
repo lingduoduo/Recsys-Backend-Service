@@ -38,6 +38,64 @@ class CircuitBreakerTest {
     }
 
     @Test
+    void releasingAProbeFreesItsSlotWithoutClosingTheBreaker() {
+        AtomicLong clock = new AtomicLong();
+        CircuitBreaker cb = new CircuitBreaker(1, 100L, clock::get);
+
+        cb.recordFailure(cb.tryAcquirePermit());
+        clock.set(100L);
+        CircuitBreaker.Permit probe = cb.tryAcquirePermit();
+        assertThat(probe).isNotNull();
+        assertThat(cb.tryAcquirePermit()).isNull();   // slot is claimed
+
+        cb.releasePermit(probe);
+
+        assertThat(cb.state()).isEqualTo(HALF_OPEN);  // proved nothing, so still not closed
+        assertThat(cb.failureCount()).isEqualTo(1);
+        assertThat(cb.tryAcquirePermit()).isNotNull();  // the next request may probe
+    }
+
+    @Test
+    void releasingAClosedPermitIsANoOpAndReleaseIsIdempotent() {
+        AtomicLong clock = new AtomicLong();
+        CircuitBreaker cb = new CircuitBreaker(2, 100L, clock::get);
+
+        cb.recordFailure(cb.tryAcquirePermit());
+        CircuitBreaker.Permit closedPermit = cb.tryAcquirePermit();
+        assertThat(closedPermit).isNotNull();
+
+        cb.releasePermit(closedPermit);
+        cb.releasePermit(closedPermit);
+        cb.releasePermit(null);
+
+        assertThat(cb.state()).isEqualTo(CLOSED);
+        assertThat(cb.failureCount()).isEqualTo(1);   // release neither counts nor clears
+
+        cb.recordFailure(cb.tryAcquirePermit());
+        assertThat(cb.state()).isEqualTo(OPEN);
+    }
+
+    @Test
+    void aStaleReleaseCannotFreeTheCurrentGenerationsProbe() {
+        AtomicLong clock = new AtomicLong();
+        CircuitBreaker cb = new CircuitBreaker(1, 100L, clock::get);
+
+        cb.recordFailure(cb.tryAcquirePermit());
+        clock.set(100L);
+        CircuitBreaker.Permit oldProbe = cb.tryAcquirePermit();
+        cb.recordFailure(oldProbe);                  // re-opens into a new generation
+        clock.set(200L);
+        CircuitBreaker.Permit currentProbe = cb.tryAcquirePermit();
+        assertThat(currentProbe).isNotNull();
+
+        cb.releasePermit(oldProbe);                  // late arrival from the old generation
+
+        assertThat(cb.tryAcquirePermit()).isNull();  // current probe still owns the slot
+        cb.releasePermit(currentProbe);
+        assertThat(cb.tryAcquirePermit()).isNotNull();
+    }
+
+    @Test
     void onlyOnePermitOwnsHalfOpenProbe() {
         AtomicLong clock = new AtomicLong();
         CircuitBreaker cb = new CircuitBreaker(1, 100L, clock::get);

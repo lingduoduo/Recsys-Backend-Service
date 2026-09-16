@@ -55,8 +55,10 @@ rg -n 'rulebased' src pom.xml .claude docs/runbooks docs/system_design
 Expected: Maven commands and whitespace check exit 0; the reference search returns no matches (exit 1). Inspect the rename diff to ensure training code is unchanged. Existing compilation and tests cover this refactor; do not add implementation-mirroring tests.
 
 - [x] Request independent code review and resolve material findings.
-- [ ] Commit the code, spec, and plan on `refactor/embedding-training-package`, push to origin, and create a PR against `main`. Include verification results and the entry-point migration note.
+- [x] Commit the code, spec, and plan on `refactor/embedding-training-package`, push to origin, and create a PR against `main`. Include verification results and the entry-point migration note.
 
 ## Verification results
 
 Default `mvn -q clean test` passed on JDK 17: {'tests': 2001, 'failures': 0, 'errors': 0, 'skipped': 0}; `mvn -q -Poffline-embedding -DskipTests compile` passed. Independent code review found no material issues. An initial overlapping Maven run failed test compilation; rerunning from clean sequentially passed without source changes.
+
+Delivered in [PR #326](https://github.com/lingduoduo/Recsys-Backend-Service/pull/326).

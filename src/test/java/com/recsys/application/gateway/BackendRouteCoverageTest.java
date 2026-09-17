@@ -115,6 +115,34 @@ class BackendRouteCoverageTest {
         }
     }
 
+    /**
+     * {@code PREFIX} is a {@code Map.of}, whose iteration order is randomized per JVM, and
+     * {@code lookup} returns the FIRST matching prefix. If one declared prefix were a proper
+     * prefix of another — say {@code /api/v1/retrieval} alongside
+     * {@code /api/v1/retrieval/profile-audit} — which policy applied would depend on the JVM's
+     * hash seed: OPERATOR on some pods, AUTHENTICATED on others, with the suite green either way.
+     *
+     * <p>No two of today's prefixes overlap, so this pins that rather than fixing anything. The
+     * cheap fix for a future overlap is to keep the entries disjoint; the alternative is an
+     * ordered map and a longest-match rule, which is a bigger change than the table needs today.
+     */
+    @Test
+    void noDeclaredPrefixIsAProperPrefixOfAnother() {
+        for (String service : BackendRoutePolicy.declaredServices()) {
+            for (String outer : BackendRoutePolicy.prefixPaths(service)) {
+                for (String inner : BackendRoutePolicy.prefixPaths(service)) {
+                    if (outer.equals(inner)) {
+                        continue;
+                    }
+                    assertFalse(inner.startsWith(outer + "/"),
+                            "Prefix " + service + inner + " sits under " + outer + ", and PREFIX is "
+                                    + "an unordered Map.of — which of the two governs a request is "
+                                    + "then decided by the JVM's hash seed, not by this table.");
+                }
+            }
+        }
+    }
+
     /** Scans all three backend mains, keyed by their registry service name. */
     private static Map<String, Set<String>> scanAllServices() throws IOException {
         Map<String, Set<String>> routes = new LinkedHashMap<>();
@@ -199,6 +227,22 @@ class BackendRouteCoverageTest {
                 "GATEWAY_PUBLIC_PATHS made these user-scoped routes anonymously reachable: "
                         + reachable + ". Anonymous is SERVICE tier, which is exempt from the "
                         + "user-scope check, so this is an off switch for 20_AuthN_AuthZ §10.");
+    }
+
+    /**
+     * {@code userScopedGatewayPaths} used to walk only {@code EXACT}, so the three retrieval
+     * paths declared {@code userScoped(UserIdSource.PATH)} in {@code PREFIX} — a path template is
+     * not a path, so they cannot be declared exactly — were invisible to the guard this test
+     * exercises. This pins that the derivation now sees them too.
+     */
+    @Test
+    void userScopedGatewayPathsIncludesPrefixDeclaredRoutes() {
+        Set<String> userScoped = BackendRoutePolicy.userScopedGatewayPaths(MicroserviceRoute.defaults());
+        assertTrue(userScoped.containsAll(Set.of(
+                        "/api/retrieval/api/v1/retrieval/recommend",
+                        "/api/retrieval/api/v1/retrieval/predict",
+                        "/api/retrieval/api/v1/retrieval/users")),
+                "derived set is missing a PREFIX-declared user-scoped retrieval path: " + userScoped);
     }
 
     // ---- the scanners only guarantee anything if nothing registers routes elsewhere ---------

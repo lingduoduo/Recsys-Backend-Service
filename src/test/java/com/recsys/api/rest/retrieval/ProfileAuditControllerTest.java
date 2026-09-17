@@ -1,5 +1,7 @@
-package com.recsys.retrieval.controller;
+package com.recsys.api.rest.retrieval;
 
+import com.recsys.application.auth.LoginTokenService;
+import com.recsys.config.RequestScopeData;
 import com.recsys.retrieval.service.audit.AccountAuditReport;
 import com.recsys.retrieval.service.audit.ProfileAuditReport;
 import com.recsys.retrieval.service.audit.ProfileAuditReport.Finding;
@@ -33,6 +35,12 @@ class ProfileAuditControllerTest {
     @MockBean
     ProfileAuditService auditService;
 
+    @MockBean
+    LoginTokenService loginTokenService;
+
+    @MockBean
+    RequestScopeData requestScopeData;
+
     private static ProfileAuditReport report() {
         return new ProfileAuditReport("ok", "run-7", "2026-09-07T10:00:00Z", 812L, false,
             new Summary(3, 2, 1, Map.of("missing_profile", 1), Map.of("new_or_unknown", 1), Map.of(), 3400L, 12),
@@ -45,7 +53,7 @@ class ProfileAuditControllerTest {
     void returnsTheReportWithSnakeCaseFieldsAndNoNulls() throws Exception {
         when(auditService.audit(isNull())).thenReturn(report());
 
-        mvc.perform(get("/actuator/profile-audit"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ok"))
             .andExpect(jsonPath("$.active_run").value("run-7"))
@@ -64,7 +72,7 @@ class ProfileAuditControllerTest {
     void serializesFieldsInDocumentedOrder() throws Exception {
         when(auditService.audit(isNull())).thenReturn(report());
 
-        String body = mvc.perform(get("/actuator/profile-audit"))
+        String body = mvc.perform(get("/api/v1/retrieval/profile-audit"))
             .andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
 
@@ -75,7 +83,7 @@ class ProfileAuditControllerTest {
     void passesLimitThrough() throws Exception {
         when(auditService.audit(25)).thenReturn(report());
 
-        mvc.perform(get("/actuator/profile-audit").param("limit", "25"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit").param("limit", "25"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ok"));
     }
@@ -84,7 +92,7 @@ class ProfileAuditControllerTest {
     void badLimitIs400() throws Exception {
         when(auditService.audit(any())).thenThrow(new IllegalArgumentException("limit must be between 1 and 10000"));
 
-        mvc.perform(get("/actuator/profile-audit").param("limit", "0"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit").param("limit", "0"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("limit must be between 1 and 10000"));
     }
@@ -93,7 +101,7 @@ class ProfileAuditControllerTest {
     void busyIs409() throws Exception {
         when(auditService.audit(any())).thenThrow(new ProfileAuditService.AuditBusyException());
 
-        mvc.perform(get("/actuator/profile-audit"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.status").value("busy"));
     }
@@ -103,7 +111,7 @@ class ProfileAuditControllerTest {
         when(auditService.audit(any())).thenThrow(
             new ProfileAuditService.ProfileAuditFailedException(new IllegalStateException("redis unavailable")));
 
-        mvc.perform(get("/actuator/profile-audit"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit"))
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.status").value("error"))
             .andExpect(jsonPath("$.message").value("redis unavailable"));
@@ -118,7 +126,7 @@ class ProfileAuditControllerTest {
     void returnsOneAccountRow() throws Exception {
         when(auditService.auditAccount("u2")).thenReturn(accountReport());
 
-        mvc.perform(get("/actuator/profile-audit/u2"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit/u2"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ok"))
             .andExpect(jsonPath("$.active_run").value("run-7"))
@@ -130,7 +138,7 @@ class ProfileAuditControllerTest {
 
     @Test
     void anInvalidAccountIdIs400() throws Exception {
-        mvc.perform(get("/actuator/profile-audit/bad id!"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit/bad id!"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("Invalid input: id must be 1-64 alphanumeric characters"));
     }
@@ -140,7 +148,7 @@ class ProfileAuditControllerTest {
         when(auditService.auditAccount(anyString())).thenThrow(
             new ProfileAuditService.ProfileAuditFailedException(new IllegalStateException("redis unavailable")));
 
-        mvc.perform(get("/actuator/profile-audit/u2"))
+        mvc.perform(get("/api/v1/retrieval/profile-audit/u2"))
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.status").value("error"))
             .andExpect(jsonPath("$.message").value("redis unavailable"));

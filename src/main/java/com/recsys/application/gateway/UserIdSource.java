@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linecorp.armeria.common.AggregatedHttpRequest;
 import com.linecorp.armeria.common.QueryParams;
 
+import java.util.Set;
+
 /**
  * Where a user-scoped backend route carries the {@code userId} it acts on.
  *
@@ -35,6 +37,38 @@ enum UserIdSource {
                     return "";
                 }
                 return scalarText(root.get(PARAM));
+            } catch (Exception e) {
+                return "";
+            }
+        }
+    },
+
+    /**
+     * The same top-level scalar read as {@link #BODY}, but from the JSON field {@code user}.
+     *
+     * <p>It exists because {@code /api/v1/retrieval/feedback} deserializes into
+     * {@code FeedbackRequest}, whose field is named {@code user}, not {@code userId} — and
+     * {@code HybridRecommendationService.recordFeedback} acts on {@code request.user()}. A field
+     * name that disagrees with the one the handler reads is not a compile error here; it is a
+     * silently wrong authorization decision, and it fails in <em>both</em> directions at once.
+     * {@link #BODY} on this route read {@code ""} from every honest body and 403'd it, while a
+     * body carrying both keys — {@code {"userId":"<caller>","user":"<victim>"}} — passed the
+     * gateway on the key the backend ignores, and Spring's Jackson (which, unlike a bare
+     * {@code ObjectMapper}, disables {@code FAIL_ON_UNKNOWN_PROPERTIES}) dropped {@code userId}
+     * and wrote bandit counters, Q-values, reward totals and the replay buffer as the victim.
+     *
+     * <p>Renaming the record field would have fixed it too, at the cost of breaking a published
+     * wire contract; reading the right field costs nothing.
+     */
+    BODY_USER {
+        @Override
+        String extract(String targetPath, AggregatedHttpRequest request) {
+            try {
+                JsonNode root = MAPPER.readTree(request.contentUtf8());
+                if (root == null || !root.isObject()) {
+                    return "";
+                }
+                return scalarText(root.get(USER_PARAM));
             } catch (Exception e) {
                 return "";
             }
@@ -80,10 +114,56 @@ enum UserIdSource {
                 return "";
             }
         }
+    },
+
+    /**
+     * A path segment: {@code /api/v1/retrieval/recommend/123}. The retrieval routes spell the
+     * userId as a path variable, which no other source can read, so without this case they could
+     * only be classified AUTHENTICATED — and any authenticated caller could then read another
+     * user's profile by editing the path.
+     *
+     * <p>Reads the segment <em>after</em> a known marker rather than the last segment:
+     * {@code /predict/{user}/{item}} puts the item last, so "take the tail" would compare the
+     * caller's id against a movie id and deny every legitimate call.
+     */
+    PATH {
+        @Override
+        String extract(String targetPath, AggregatedHttpRequest request) {
+            if (targetPath == null) {
+                return "";
+            }
+            int mark = targetPath.indexOf('?');
+            String path = mark < 0 ? targetPath : targetPath.substring(0, mark);
+            String[] segments = path.split("/");
+            // Stops one short of the end: a marker with nothing after it carries no id.
+            for (int i = 0; i < segments.length - 1; i++) {
+                if (MARKERS.contains(segments[i])) {
+                    return segments[i + 1].trim();
+                }
+            }
+            return "";
+        }
     };
 
-    /** The parameter and JSON field name is `userId` on every route in the table. */
+    /**
+     * The query-parameter and JSON field name {@link #QUERY}, {@link #BODY} and
+     * {@link #BODY_INSTANCES} read. It is <em>not</em> universal: the retrieval routes spell the
+     * subject differently — as a path segment ({@link #PATH}) or as the JSON field {@code user}
+     * ({@link #BODY_USER}). Which name a route uses is a property of that route's request type,
+     * so check the handler's body class before reusing a source on a new route.
+     */
     static final String PARAM = "userId";
+
+    /** {@link #BODY_USER}'s field name — {@code FeedbackRequest.user}. */
+    static final String USER_PARAM = "user";
+
+    /**
+     * The segments {@link #PATH} reads an id from — the segment that follows one of these is the
+     * userId. Kept as a closed set rather than a positional index because the prefix length is not
+     * fixed: the same handler is reachable under several gateway spellings, and a positional rule
+     * would silently read the wrong segment under any of them.
+     */
+    private static final Set<String> MARKERS = Set.of("recommend", "predict", "users");
 
     /** The array field wrapping a TF-Serving predict batch. */
     private static final String INSTANCES = "instances";

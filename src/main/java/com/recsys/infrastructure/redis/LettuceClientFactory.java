@@ -35,6 +35,16 @@ public final class LettuceClientFactory {
     private LettuceClientFactory() {}
 
     /**
+     * Public entry point for callers outside this package that build their own client from
+     * {@link RedisProperties} — today, {@code RetrievalRedisConfig}, which hands Spring Data
+     * Redis a connection factory. Without this, the Spring Data path would be the one way into
+     * Redis that the credential guard does not cover.
+     */
+    public static void requireAuthentication(RedisProperties props, Map<String, String> env) {
+        requireAuthentication(props.getPassword(), env);
+    }
+
+    /**
      * Refuses to open a connection to an unauthenticated Redis unless something says so out loud.
      * Mirrors GatewayAuthenticator.fromEnvironment: REDIS_PASSWORD was supported by this class and
      * set by no manifest, which is exactly how every service ended up connecting as the

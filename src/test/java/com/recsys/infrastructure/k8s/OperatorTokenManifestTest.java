@@ -97,7 +97,11 @@ class OperatorTokenManifestTest {
     /** Which Deployment supplies the token to each file that reads it. */
     private static final Map<String, String> READER_WORKLOADS = Map.of(
             "OnlinePredictionServer.java", "recsys-online-serving",
-            "MicroserviceGatewayServer.java", "recsys-api-gateway");
+            "MicroserviceGatewayServer.java", "recsys-api-gateway",
+            // Second layer on POST /api/v1/retrieval/model/reload: the gateway's OPERATOR
+            // classification binds only callers who come through the gateway, so the controller
+            // checks the same token in-JVM, as 7010's operator surfaces have always done.
+            "ModelReloadController.java", "recsys-model-serving");
 
     /**
      * Files the scan matches that do not actually read the variable, mapped to why. Each entry is

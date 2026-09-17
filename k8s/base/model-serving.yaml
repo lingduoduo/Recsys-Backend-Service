@@ -98,6 +98,17 @@ spec:
                   name: recsys-secrets
                   key: recommendation-cursor-previous-key
                   optional: true
+            # Operator token for POST /api/v1/retrieval/model/reload, which swaps the live ONNX
+            # session. ModelReloadController checks it in-JVM with the same AdminTokenGuard 7010
+            # uses, so the route is covered twice: here and by the gateway's OPERATOR
+            # classification. Unset means the in-JVM check authorizes nobody, so the reload fails
+            # closed (403) — the same Secret the gateway and 7010 already read.
+            - name: SHARD_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: recsys-online-admin
+                  key: admin-token
+                  optional: true
             # Splunk HEC log shipping. Inert until the recsys-splunk Secret exists, so
             # optional: true keeps pods schedulable before it is provisioned — same pattern
             # as recsys-online-admin / SHARD_ADMIN_TOKEN. See

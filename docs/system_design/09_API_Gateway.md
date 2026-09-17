@@ -52,6 +52,7 @@ longest-first). Registered routes:
 | `/api/users`, `/api/movies` | 6010 | User / movie metadata |
 | `/api/features` | 7010 | Online feature snapshot |
 | `/api/knowledge` | 8080 | Knowledge service |
+| `/api/retrieval` | 8080 | Merged retrieval surface (recommend/predict/embedding/profile/feedback) — see the wart below |
 | `/api/catalog`, `/api/model`, `/api/online` | 6010/8080/7010 | Deprecated back-compat aliases |
 | `/api/llm`, `/api/explanations` | (LLM) | Opt-in, registered only when the env var is set |
 
@@ -65,6 +66,21 @@ Prefix-strip is `MicroserviceRoute.rewrite`: it validates the prefix match, take
 `baseUri`, and preserves the raw query string. `matchesPrefix` enforces segment
 boundaries (`path == prefix || startsWith(prefix + "/")`), so `/api/usersettings`
 does **not** match `/api/users`.
+
+**`/api/retrieval` doubles its own path segment**, the same way `/api/model` already
+does. The retrieval Spring controllers, moved into `com/recsys/api/rest/retrieval`
+when the retrieval service was merged into model serving, carry their own
+`/api/v1/retrieval` `@RequestMapping`; `MicroserviceRoute.rewrite` then appends the
+full backend path after stripping only the gateway's `/api/retrieval` prefix. The
+public URL is therefore `/api/retrieval/api/v1/retrieval/recommend/{user}`, not the
+`/api/retrieval/recommend/{user}` a client would reasonably expect. `/api/model`
+carries the identical shape (`/api/model` + `/api/v1/model/versions`), for the same
+reason: both back onto Spring controllers that keep their own versioned mapping.
+Catalog and online avoid it only because their handlers are registered at the
+Armeria server root, with no second prefix of their own to stack. This is a wart
+inherited from how the two backends structure their own routes, not a deliberate
+design choice — record it here rather than let a future reader assume the doubling
+is intentional.
 
 [`GatewayRequestForwarder.forward`](../../src/main/java/com/recsys/application/gateway/GatewayRequestForwarder.java)
 does the actual proxying and maps failures to a clean contract:

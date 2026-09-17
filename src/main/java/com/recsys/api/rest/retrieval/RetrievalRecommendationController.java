@@ -1,4 +1,4 @@
-package com.recsys.retrieval.controller;
+package com.recsys.api.rest.retrieval;
 
 import com.recsys.retrieval.service.DeepLearningPredictionService;
 import com.recsys.retrieval.model.FeedbackRequest;
@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -40,13 +41,14 @@ import java.sql.SQLTimeoutException;
 import org.springframework.dao.QueryTimeoutException;
 
 @RestController
+@RequestMapping("/api/v1/retrieval")
 @Validated
-public class RecommendationController {
-    private static final Logger log = LoggerFactory.getLogger(RecommendationController.class);
+public class RetrievalRecommendationController {
+    private static final Logger log = LoggerFactory.getLogger(RetrievalRecommendationController.class);
     private static final String DEFAULT_LIMIT = "6";
     private static final int MAX_LIMIT = 50;
 
-    @Value("${recsys.embeddings.item-prefix:i2vEmb}")
+    @Value("${recsys.retrieval.embeddings.item-prefix:i2vEmb}")
     private String itemEmbeddingPrefix;
 
     private final StringRedisTemplate redis;
@@ -55,7 +57,7 @@ public class RecommendationController {
     private final RecommendationMeasurementService measurementService;
     private final UserProfileClient userProfileClient;
 
-    public RecommendationController(
+    public RetrievalRecommendationController(
         StringRedisTemplate redis,
         HybridRecommendationService recommendationService,
         DeepLearningPredictionService predictionService,
@@ -71,7 +73,10 @@ public class RecommendationController {
 
     @GetMapping("/embedding/{item}")
     public Map<String, Object> embedding(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
+        // Named explicitly: implicit @PathVariable/@RequestParam binding needs the compiler's
+        // -parameters flag, which maven-compiler-plugin's incremental recompile silently drops —
+        // a non-clean `mvn test` then 400s every one of these with IllegalArgumentException.
+        @PathVariable("item") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -111,8 +116,8 @@ public class RecommendationController {
 
     @GetMapping("/recommend/{user}")
     public Map<String, Object> recommend(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
-        @RequestParam(defaultValue = DEFAULT_LIMIT) int limit
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
+        @RequestParam(value = "limit", defaultValue = DEFAULT_LIMIT) int limit
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -138,8 +143,8 @@ public class RecommendationController {
 
     @GetMapping("/predict/{user}/{item}")
     public Map<String, Object> predict(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user,
+        @PathVariable("item") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String item
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -165,8 +170,8 @@ public class RecommendationController {
 
     @GetMapping("/predict/id")
     public Map<String, Object> predictById(
-        @RequestParam @Min(0) long userId,
-        @RequestParam @Min(0) long itemId
+        @RequestParam("userId") @Min(0) long userId,
+        @RequestParam("itemId") @Min(0) long itemId
     ) {
         long started = System.nanoTime();
         boolean error = true;
@@ -190,7 +195,7 @@ public class RecommendationController {
 
     @GetMapping("/users/{user}/profile")
     public ResponseEntity<UserBehaviorProfile> profile(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
     ) {
         long started = System.nanoTime();
         boolean error = true;

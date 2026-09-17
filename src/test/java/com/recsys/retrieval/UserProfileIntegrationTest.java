@@ -1,5 +1,6 @@
 package com.recsys.retrieval;
 
+import com.recsys.api.rest.ModelApplication;
 import com.recsys.retrieval.support.ContractFixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,16 +51,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Docker daemon older than 25 if you need it. The Testcontainers version comes from the Spring
  * Boot parent, not from our pom.
  */
-@SpringBootTest(properties = {
-    "recsys.catalog.a-sci-fi.title=Shared Fixture Sci-Fi",
-    "recsys.catalog.a-sci-fi.genres[0]=sci-fi",
-    "recsys.catalog.a-sci-fi.tags[0]=space",
-    "recsys.catalog.a-sci-fi.new-release=false",
-    "recsys.catalog.z-drama.title=Baseline Drama",
-    "recsys.catalog.z-drama.genres[0]=drama",
-    "recsys.catalog.z-drama.tags[0]=character",
-    "recsys.catalog.z-drama.new-release=false",
-    "spring.data.redis.port=1"
+@SpringBootTest(classes = ModelApplication.class, properties = {
+    "recsys.retrieval.catalog.a-sci-fi.title=Shared Fixture Sci-Fi",
+    "recsys.retrieval.catalog.a-sci-fi.genres[0]=sci-fi",
+    "recsys.retrieval.catalog.a-sci-fi.tags[0]=space",
+    "recsys.retrieval.catalog.a-sci-fi.new-release=false",
+    "recsys.retrieval.catalog.z-drama.title=Baseline Drama",
+    "recsys.retrieval.catalog.z-drama.genres[0]=drama",
+    "recsys.retrieval.catalog.z-drama.tags[0]=character",
+    "recsys.retrieval.catalog.z-drama.new-release=false",
+    "recsys.redis.port=1"
 })
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
@@ -74,8 +75,8 @@ class UserProfileIntegrationTest {
 
     @DynamicPropertySource
     static void redisProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.data.redis.host", REDIS::getHost);
-        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+        registry.add("recsys.redis.host", REDIS::getHost);
+        registry.add("recsys.redis.port", () -> REDIS.getMappedPort(6379));
     }
 
     @Autowired

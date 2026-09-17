@@ -29,7 +29,7 @@ public class RedisProfileAuditStore implements ProfileAuditStore {
 
     public RedisProfileAuditStore(
         StringRedisTemplate redis,
-        @Value("${recsys.user-profile.key-prefix:user-profile:v1}") String keyPrefix
+        @Value("${recsys.retrieval.user-profile.key-prefix:user-profile:v1}") String keyPrefix
     ) {
         this.redis = redis;
         this.keyPrefix = keyPrefix;

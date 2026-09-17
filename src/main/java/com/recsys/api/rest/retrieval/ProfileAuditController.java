@@ -1,4 +1,4 @@
-package com.recsys.retrieval.controller;
+package com.recsys.api.rest.retrieval;
 
 import com.recsys.retrieval.service.audit.ProfileAuditService;
 import com.recsys.retrieval.service.audit.ProfileAuditService.AuditBusyException;
@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * Operator tool, like /actuator/model-reload: walks user → has_profile → preferences → catalog
+ * Operator tool, like /api/v1/retrieval/model/reload: walks user → has_profile → preferences → catalog
  * content and returns a findings-only report. Records no serving measurement.
  */
 @RestController
@@ -34,8 +34,11 @@ public class ProfileAuditController {
         this.auditService = auditService;
     }
 
-    @GetMapping("/actuator/profile-audit")
-    public ResponseEntity<?> audit(@RequestParam(required = false) Integer limit) {
+    @GetMapping("/api/v1/retrieval/profile-audit")
+    // Named explicitly: implicit @RequestParam/@PathVariable binding needs the compiler's
+    // -parameters flag, which maven-compiler-plugin's incremental recompile silently drops —
+    // a non-clean `mvn test` then 400s these with IllegalArgumentException.
+    public ResponseEntity<?> audit(@RequestParam(value = "limit", required = false) Integer limit) {
         try {
             return ResponseEntity.ok(auditService.audit(limit));
         } catch (IllegalArgumentException e) {
@@ -49,9 +52,9 @@ public class ProfileAuditController {
         }
     }
 
-    @GetMapping("/actuator/profile-audit/{user}")
+    @GetMapping("/api/v1/retrieval/profile-audit/{user}")
     public ResponseEntity<?> auditAccount(
-        @PathVariable @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
+        @PathVariable("user") @Pattern(regexp = "[a-zA-Z0-9_:-]{1,64}") String user
     ) {
         try {
             return ResponseEntity.ok(auditService.auditAccount(user));

@@ -31,6 +31,14 @@ public record MicroserviceRoute(String name,
         routes.add(fromEnv("movie-metadata",  "/api/movies",   "MOVIE_METADATA_SERVICE_URL",  "http://localhost:6010", "/health",       "recsys-catalog-serving"));
         routes.add(fromEnv("feature",         "/api/features", "FEATURE_SERVICE_URL",          "http://localhost:7010", "/health",       "recsys-online-serving"));
         routes.add(fromEnv("knowledge",       "/api/knowledge","KNOWLEDGE_SERVICE_URL",        "http://localhost:8080", "/health/ready", "recsys-model-serving"));
+        // The merged retrieval surface, which serves /api/v1/retrieval/** inside the 8080 JVM.
+        // The gateway path therefore doubles the segment — /api/retrieval/api/v1/retrieval/... —
+        // exactly as /api/model/api/v1/recommend and /api/online/online/features already do.
+        // That identity (gateway path == prefix + backend path) is not cosmetic: rewrite() only
+        // strips the prefix, and BackendRoutePolicy.userScopedGatewayPaths derives the
+        // never-public guard from it. Folding /api/v1/retrieval into baseUri would read better
+        // and silently break both that guard and GatewayHealthService's health URL.
+        routes.add(fromEnv("retrieval",       "/api/retrieval","RETRIEVAL_SERVICE_URL",        "http://localhost:8080", "/health/ready", "recsys-model-serving"));
         // Backward-compatible routes kept for existing clients and smoke tests.
         routes.add(fromEnv("catalog", "/api/catalog", "CATALOG_SERVICE_URL", "http://localhost:6010", "/health",       "recsys-catalog-serving"));
         routes.add(fromEnv("model",   "/api/model",   "MODEL_SERVICE_URL",   "http://localhost:8080", "/health/ready", "recsys-model-serving"));

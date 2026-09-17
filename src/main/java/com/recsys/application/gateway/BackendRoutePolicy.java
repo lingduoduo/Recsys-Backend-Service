@@ -108,7 +108,33 @@ final class BackendRoutePolicy {
                     Map.entry("/health/load", of(Access.NO_PROXY)),
                     Map.entry("/health/cache", of(Access.NO_PROXY)),
                     Map.entry("/health/ab-tests", of(Access.NO_PROXY)),
-                    Map.entry("/health/ready", of(Access.NO_PROXY))));
+                    Map.entry("/health/ready", of(Access.NO_PROXY)),
+                    // The /api/v1/retrieval surface. Only the paths with no template segment can
+                    // be spelled exactly; the other four live in PREFIX below.
+                    //
+                    // /predict/id is an UNSCOPED ALIAS for the user-scoped templated route: it
+                    // reaches the same predictionService.predict(userId, itemId) as
+                    // /predict/{user}/{item}, addressed by raw model indices instead of account
+                    // ids. Classified AUTHENTICATED it would hand any authenticated caller the
+                    // score they were just 403'd for on the templated spelling — and the indices
+                    // are dense and bounded by userLookup.size(), so they enumerate rather than
+                    // having to be guessed. /predict/metadata publishes that bound. Both are
+                    // debug/index surfaces with no client need through the gateway and the whole
+                    // retrieval surface is new to it, so NO_PROXY regresses nothing. Promote them
+                    // deliberately, with a user-scope story, or not at all.
+                    Map.entry("/api/v1/retrieval/predict/id", of(Access.NO_PROXY)),
+                    Map.entry("/api/v1/retrieval/predict/metadata", of(Access.NO_PROXY)),
+                    // BODY_USER, not BODY: FeedbackRequest's field is `user`. BODY read `userId`,
+                    // which this body never carries — denying every honest call while a body
+                    // naming both keys passed on the one the backend ignores.
+                    Map.entry("/api/v1/retrieval/feedback", userScoped(UserIdSource.BODY_USER)),
+                    Map.entry("/api/v1/retrieval/metrics", of(Access.NO_PROXY)),
+                    // Reloads the live ONNX session — the same class of mutation as
+                    // /api/v1/model/versions/activate, and it arrived from the retrieval drop-in
+                    // with no authorization at all. It used to sit under /actuator, which this
+                    // table already refuses to proxy, so moving it out and leaving it
+                    // unclassified would have made it *more* reachable, not less.
+                    Map.entry("/api/v1/retrieval/model/reload", of(Access.OPERATOR))));
 
     /**
      * The paths that cannot be enumerated as exact strings, so the only ones matched by prefix.
@@ -139,7 +165,31 @@ final class BackendRoutePolicy {
     private static final Map<String, Map<String, Policy>> PREFIX = Map.of(
             "recsys-model-serving", Map.of(
                     "/actuator", of(Access.NO_PROXY),
-                    "/api/v1/knowledge-bases", of(Access.AUTHENTICATED)),
+                    "/api/v1/knowledge-bases", of(Access.AUTHENTICATED),
+                    // Path templates, not paths, for the same reason as /api/v1/knowledge-bases:
+                    // "/api/v1/retrieval/recommend/{user}" declared exactly would match only the
+                    // literal the route scanner emits and that no client ever sends, 404ing every
+                    // real id while both coverage tests stayed green. None of these four may also
+                    // appear in EXACT — exact wins the lookup, which would kill the prefix branch,
+                    // and noPrefixEntryShadowsADeclaredExactPath fails on it.
+                    //
+                    // The userId is a path segment on all three user routes, hence
+                    // UserIdSource.PATH: AUTHENTICATED here would let any authenticated caller
+                    // read another user's profile by editing the path.
+                    //
+                    // /api/v1/retrieval/predict sits above the exact /predict/id and
+                    // /predict/metadata entries, which name no user. Exact is tried first, so
+                    // those two still resolve to their own NO_PROXY entries; the prefix governs
+                    // /predict/{user}/{item} alone.
+                    "/api/v1/retrieval/recommend", userScoped(UserIdSource.PATH),
+                    "/api/v1/retrieval/predict", userScoped(UserIdSource.PATH),
+                    "/api/v1/retrieval/users", userScoped(UserIdSource.PATH),
+                    // Item embeddings, not user data — the same tier as catalog serving's /item
+                    // and /similar. Named here rather than exactly because /embedding/{item} is
+                    // a template too.
+                    "/api/v1/retrieval/embedding", of(Access.AUTHENTICATED),
+                    // Operator tooling: walks every user's profile and preferences.
+                    "/api/v1/retrieval/profile-audit", of(Access.OPERATOR)),
             "recsys-online-serving", Map.of("/shards", of(Access.AUTHENTICATED)));
 
     private BackendRoutePolicy() {}
@@ -200,23 +250,36 @@ final class BackendRoutePolicy {
      * {@code GATEWAY_PUBLIC_PATHS} would make its callers anonymous, hence service-tier, hence
      * exempt from the very check declared here.
      *
+     * <p>Walks both {@code EXACT} and {@code PREFIX}: the retrieval surface declares its three
+     * template-path entries ({@code /api/v1/retrieval/recommend}, {@code .../predict}, and
+     * {@code .../users}, all {@code userScoped(UserIdSource.PATH)}) only in {@code PREFIX}, for
+     * the same reason {@link #lookup} consults it — a path template is not a path. A version of
+     * this method that read only {@code EXACT} would leave those three invisible here, so adding
+     * one of them to {@code GATEWAY_PUBLIC_PATHS} would make it anonymous — hence service-tier,
+     * hence exempt from user-scope enforcement — with this very guard reporting nothing wrong.
+     *
      * <p>User-scoped only, deliberately. NO_PROXY paths need no never-public guard because they
      * are not proxied at all, and OPERATOR paths carry their own credential.
      */
     static Set<String> userScopedGatewayPaths(List<MicroserviceRoute> routes) {
         Set<String> paths = new LinkedHashSet<>();
         for (MicroserviceRoute route : routes) {
-            Map<String, Policy> declared = EXACT.get(route.serviceName());
-            if (declared == null) {
-                continue;
-            }
-            declared.forEach((backendPath, policy) -> {
-                if (policy.access() == Access.USER_SCOPED) {
-                    paths.add(route.prefix() + backendPath);
-                }
-            });
+            addUserScopedPaths(paths, route, EXACT.get(route.serviceName()));
+            addUserScopedPaths(paths, route, PREFIX.get(route.serviceName()));
         }
         return Set.copyOf(paths);
+    }
+
+    private static void addUserScopedPaths(
+            Set<String> paths, MicroserviceRoute route, Map<String, Policy> declared) {
+        if (declared == null) {
+            return;
+        }
+        declared.forEach((backendPath, policy) -> {
+            if (policy.access() == Access.USER_SCOPED) {
+                paths.add(route.prefix() + backendPath);
+            }
+        });
     }
 
     /**

@@ -699,6 +699,15 @@
                 <include>**/experiment/VariantRuntimeResolverTest.java</include>
                 <include>**/retrieval/multichannel/RecallTaskMetricsTest.java</include>
                 <include>**/k8s/ModelServingManifestTest.java</include>
+                <!-- Without this on the gate, a dropped exclude= entry or a renamed/removed
+                     RetrievalRedisConfig bean reopens a second, unguarded Redis pool on 8080. -->
+                <include>**/config/RedisAutoConfigurationExclusionTest.java</include>
+                <!-- Without this on the gate, the recsys.redis-backed connection factory could
+                     stop honouring REDIS_ALLOW_NO_AUTH / credentials with no test catching it. -->
+                <include>**/config/RetrievalRedisConfigTest.java</include>
+                <!-- Without this on the gate, the blank-password refusal itself could regress and
+                     every unauthenticated Redis connection on 8080 would go unnoticed. -->
+                <include>**/redis/LettuceClientFactoryAuthGuardTest.java</include>
 </includes>
               <excludedGroups>load,docker</excludedGroups>
             </configuration>

@@ -153,6 +153,140 @@ recsys:
       enabled: ${RECSYS_EVENTS_KAFKA_ENABLED:false}
       bootstrap-servers: ${RECSYS_EVENTS_KAFKA_BOOTSTRAP_SERVERS:}   # blank disables Kafka even when enabled=true
       exposure-topic: ${RECSYS_EVENTS_KAFKA_EXPOSURE_TOPIC:ab_exposures}
+  # Configuration for the retrieval code merged in from the standalone retrieval service. Its own
+  # application.yml did not come across with its Java sources; this is that file's recsys: block,
+  # ported verbatim and re-prefixed from recsys.* to recsys.retrieval.*. Comments and env var names
+  # are kept as the origin wrote them.
+  #
+  # Two things the origin file had that are deliberately NOT here:
+  #   - its spring.data.redis.* block: inert in this app. RedisAutoConfiguration is excluded and
+  #     RetrievalRedisConfig builds the connection factory from recsys.redis instead, so porting
+  #     those keys would look authoritative and do nothing.
+  #   - its server.port: this app already sets server.port above.
+  retrieval:
+    user-profile:
+      key-prefix: ${RECSYS_USER_PROFILE_KEY_PREFIX:user-profile:v1}
+    measurements:
+      fairness-min-support: ${RECSYS_FAIRNESS_MIN_SUPPORT:100}
+      freshness-window-days: ${RECSYS_FRESHNESS_WINDOW_DAYS:30}
+      long-tail-percentile: ${RECSYS_LONG_TAIL_PERCENTILE:0.80}
+      safety-policy-version: ${RECSYS_SAFETY_POLICY_VERSION:catalog-filter-v1}
+      latency-buckets-ms: ${RECSYS_LATENCY_BUCKETS_MS:5,10,25,50,100,250,500,1000,2500}
+      throughput-window-seconds: ${RECSYS_THROUGHPUT_WINDOW_SECONDS:60}
+      percentile-window-seconds: ${RECSYS_PERCENTILE_WINDOW_SECONDS:300}
+    cache:
+      item-vector-max-size: ${RECSYS_ITEM_VECTOR_CACHE_SIZE:10000}
+      item-vector-ttl-seconds: ${RECSYS_ITEM_VECTOR_TTL:300}
+      reward-max-size: ${RECSYS_REWARD_CACHE_SIZE:50000}
+      reward-ttl-seconds: ${RECSYS_REWARD_TTL:30}
+      grpo-weights-ttl-seconds: ${RECSYS_GRPO_WEIGHTS_TTL:10}
+    sequence:
+      # off = legacy CSV blobs only; shadow = read both and log the diff; on = serve the store
+      mode: ${RECSYS_SEQUENCE_MODE:off}
+      # The behavior sequence rolls out on its own switch: it feeds watchedMovieIds, which is an
+      # exclusion set, so it must not ride along with the rating rollout above.
+      behavior-mode: ${RECSYS_SEQUENCE_BEHAVIOR_MODE:off}
+      lookback-days: ${RECSYS_SEQUENCE_LOOKBACK_DAYS:90}
+      bucket-fetch-chunk: ${RECSYS_SEQUENCE_BUCKET_FETCH_CHUNK:7}
+    grpo:
+      # off = not computed; shadow = computed and logged at weight 0.0; on = enters the blend
+      mode: ${RECSYS_GRPO_MODE:off}
+      # Serving publishes its own impressions to behavior_logs, carrying pi_old and the feature
+      # vector. This is what gives the Kafka stream and the Redis replay buffer one requestId
+      # namespace; offline DPO cannot join without it.
+      emit-events: ${RECSYS_GRPO_EMIT_EVENTS:false}
+    # GET /api/v1/retrieval/profile-audit — operator tool; one audit at a time, bounded by max-users.
+    profile-audit:
+      user-key-pattern: ${RECSYS_PROFILE_AUDIT_USER_KEY_PATTERN:user:*:features}
+      max-users: ${RECSYS_PROFILE_AUDIT_MAX_USERS:10000}
+      chunk-size: ${RECSYS_PROFILE_AUDIT_CHUNK_SIZE:500}
+      # keep well below the Lettuce pool's max-active (32 in the origin service's
+      # spring.data.redis.lettuce.pool.max-active, which is inert in this app — see recsys.redis
+      # above instead) so an audit cannot starve serving.
+      parallelism: ${RECSYS_PROFILE_AUDIT_PARALLELISM:4}
+      sample-items: ${RECSYS_PROFILE_AUDIT_SAMPLE_ITEMS:5}
+    embeddings:
+      # Item2Vec (offline): i2vEmb  — set ITEM_EMBEDDING_PREFIX=i2vEmb
+      # ALS      (offline): alsItemEmb — set ITEM_EMBEDDING_PREFIX=alsItemEmb
+      item-prefix: ${ITEM_EMBEDDING_PREFIX:i2vEmb}
+      # User2Vec / averaged Item2Vec: uEmb      — set USER_EMBEDDING_PREFIX=uEmb
+      # ALS user factors:             alsUserEmb — set USER_EMBEDDING_PREFIX=alsUserEmb
+      user-prefix: ${USER_EMBEDDING_PREFIX:uEmb}
+    candidate-generation:
+      popularity-fetch-multiplier: ${RECSYS_POPULARITY_FETCH_MULTIPLIER:5}
+      cold-start-pool-size: ${RECSYS_COLD_START_POOL_SIZE:25}
+      # Inert: no field on RecommendationProperties.CandidateGeneration binds this key today,
+      # and nothing in src/main or src/test reads RECSYS_RANDOMIZATION_POOL. Carried over
+      # verbatim from the origin service's config; left in place as a signal of intended
+      # behaviour rather than deleted. Setting the env var has no effect.
+      top-n-randomization-pool: ${RECSYS_RANDOMIZATION_POOL:5}
+    filtering:
+      enabled: ${RECSYS_FILTERING_ENABLED:true}
+      muted-product-types: ${RECSYS_MUTED_PRODUCT_TYPES:}
+      muted-genres: ${RECSYS_MUTED_GENRES:}
+      muted-keywords: ${RECSYS_MUTED_KEYWORDS:}
+    bandit:
+      algorithm: ${RECSYS_BANDIT_ALGORITHM:ucb}
+      exploration-alpha: ${RECSYS_EXPLORATION_ALPHA:0.75}
+      max-exploration-bonus: ${RECSYS_MAX_EXPLORATION_BONUS:0.25}
+      cold-start-exposure-threshold: ${RECSYS_COLD_START_THRESHOLD:5}
+      cold-start-boost: ${RECSYS_COLD_START_BOOST:1.35}
+      relevance-weight: ${RECSYS_RELEVANCE_WEIGHT:0.6}
+      content-weight: ${RECSYS_CONTENT_WEIGHT:0.25}
+      popularity-weight: ${RECSYS_POPULARITY_WEIGHT:0.15}
+      q-learning-alpha: ${RECSYS_Q_LEARNING_ALPHA:0.1}
+      q-learning-gamma: ${RECSYS_Q_LEARNING_GAMMA:0.9}
+      q-learning-epsilon: ${RECSYS_Q_LEARNING_EPSILON:0.1}
+    replay-buffer:
+      max-size: ${RECSYS_REPLAY_BUFFER_MAX_SIZE:10000}
+      candidate-snapshot-size: ${RECSYS_REPLAY_CANDIDATE_SNAPSHOT_SIZE:20}
+      pending-ttl: ${RECSYS_REPLAY_PENDING_TTL:1h}
+    reward-model:
+      weight: ${RECSYS_REWARD_MODEL_WEIGHT:0.25}
+      global-weight: ${RECSYS_REWARD_GLOBAL_WEIGHT:0.15}
+      item-weight: ${RECSYS_REWARD_ITEM_WEIGHT:0.45}
+      genre-weight: ${RECSYS_REWARD_GENRE_WEIGHT:0.25}
+      tag-weight: ${RECSYS_REWARD_TAG_WEIGHT:0.15}
+      min-feature-count: ${RECSYS_REWARD_MIN_FEATURE_COUNT:3}
+    # Optional external catalog JSON ({itemId: {title, genres, tags, ...}}); merged on top of the
+    # inline catalog below at startup. Empty = inline catalog only. See sampledata/catalog.json.
+    catalog-path: ${RECSYS_CATALOG_PATH:}
+    catalog:
+      item1:
+        title: "Retro Space Adventure"
+        genres: ["sci-fi", "adventure"]
+        tags: ["space", "classic", "ensemble"]
+        new-release: false
+      item2:
+        title: "City Heat"
+        genres: ["action", "thriller"]
+        tags: ["crime", "urban", "fast-paced"]
+        new-release: false
+      item3:
+        title: "Midnight Runway"
+        genres: ["drama", "romance"]
+        tags: ["fashion", "character", "emotional"]
+        new-release: false
+      item4:
+        title: "Deep Blue Signal"
+        genres: ["sci-fi", "thriller"]
+        tags: ["ai", "mystery", "future"]
+        new-release: true
+      item5:
+        title: "Wild Terrain"
+        genres: ["adventure", "family"]
+        tags: ["nature", "uplifting", "journey"]
+        new-release: true
+      item6:
+        title: "Glass Horizon"
+        genres: ["drama", "sci-fi"]
+        tags: ["future", "reflective", "arthouse"]
+        new-release: false
+      item7:
+        title: "Laugh Circuit"
+        genres: ["comedy", "sci-fi"]
+        tags: ["robots", "workplace", "feel-good"]
+        new-release: true
 
 management:
   endpoints:

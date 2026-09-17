@@ -1,5 +1,7 @@
-package com.recsys.retrieval.controller;
+package com.recsys.api.rest.retrieval;
 
+import com.recsys.application.auth.LoginTokenService;
+import com.recsys.config.RequestScopeData;
 import com.recsys.retrieval.model.FeedbackRequest;
 import com.recsys.retrieval.measurement.MeasurementSnapshot;
 import com.recsys.retrieval.measurement.RecommendationMeasurementService;
@@ -26,7 +28,6 @@ import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -35,9 +36,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(RecommendationController.class)
+@WebMvcTest(RetrievalRecommendationController.class)
 @SuppressWarnings({"unchecked", "null"})
-class RecommendationControllerTest {
+class RetrievalRecommendationControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -57,13 +58,19 @@ class RecommendationControllerTest {
     @MockBean
     private UserProfileClient userProfileClient;
 
+    @MockBean
+    private LoginTokenService loginTokenService;
+
+    @MockBean
+    private RequestScopeData requestScopeData;
+
     // --- /users/{user}/profile ---
 
     @Test
     void profileEndpointReturnsCompleteNestedProfileContract() throws Exception {
         when(userProfileClient.getProfile("u1")).thenReturn(Optional.of(profile("u1")));
 
-        mockMvc.perform(get("/users/u1/profile"))
+        mockMvc.perform(get("/api/v1/retrieval/users/u1/profile"))
             .andExpect(status().isOk())
             .andExpect(content().contentTypeCompatibleWith("application/json"))
             .andExpect(jsonPath("$.user_id").value("u1"))
@@ -78,7 +85,7 @@ class RecommendationControllerTest {
     void profileEndpointReturnsNotFoundWhenNoProfileExists() throws Exception {
         when(userProfileClient.getProfile("u1")).thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/users/u1/profile"))
+        mockMvc.perform(get("/api/v1/retrieval/users/u1/profile"))
             .andExpect(status().isNotFound())
             .andExpect(content().contentTypeCompatibleWith("application/json"))
             .andExpect(jsonPath("$.error").value("profile_not_found"))
@@ -87,7 +94,7 @@ class RecommendationControllerTest {
 
     @Test
     void profileEndpointRejectsInvalidUserId() throws Exception {
-        mockMvc.perform(get("/users/user!/profile"))
+        mockMvc.perform(get("/api/v1/retrieval/users/user!/profile"))
             .andExpect(status().isBadRequest());
     }
 
@@ -99,7 +106,7 @@ class RecommendationControllerTest {
         when(redis.opsForValue()).thenReturn(ops);
         when(ops.get("i2vEmb:item1")).thenReturn("0.1 0.2 0.3");
 
-        mockMvc.perform(get("/embedding/item1"))
+        mockMvc.perform(get("/api/v1/retrieval/embedding/item1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.item").value("item1"))
             .andExpect(jsonPath("$.embedding[0]").value(0.1))
@@ -112,7 +119,7 @@ class RecommendationControllerTest {
         when(redis.opsForValue()).thenReturn(ops);
         when(ops.get("i2vEmb:unknown")).thenReturn(null);
 
-        mockMvc.perform(get("/embedding/unknown"))
+        mockMvc.perform(get("/api/v1/retrieval/embedding/unknown"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.embedding").isEmpty());
     }
@@ -123,14 +130,14 @@ class RecommendationControllerTest {
         when(redis.opsForValue()).thenReturn(ops);
         when(ops.get("i2vEmb:item1")).thenReturn("0.1 NOT_A_NUMBER 0.3");
 
-        mockMvc.perform(get("/embedding/item1"))
+        mockMvc.perform(get("/api/v1/retrieval/embedding/item1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.error").value("corrupt_data"));
     }
 
     @Test
     void embeddingReturnsBadRequestForInvalidItemId() throws Exception {
-        mockMvc.perform(get("/embedding/item!"))
+        mockMvc.perform(get("/api/v1/retrieval/embedding/item!"))
             .andExpect(status().isBadRequest());
     }
 
@@ -148,7 +155,7 @@ class RecommendationControllerTest {
             )
         );
 
-        mockMvc.perform(get("/recommend/u1"))
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.recent[0]").value("item1"))
             .andExpect(jsonPath("$.recommendations[0]").value("item3"))
@@ -163,14 +170,14 @@ class RecommendationControllerTest {
             new RecommendationResult("u1", List.of(), List.of(), List.of(), Map.of("eligibleCandidateCount", 0))
         );
 
-        mockMvc.perform(get("/recommend/u1"))
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.recommendations").isEmpty());
     }
 
     @Test
     void recommendReturnsBadRequestForInvalidUserId() throws Exception {
-        mockMvc.perform(get("/recommend/user!"))
+        mockMvc.perform(get("/api/v1/retrieval/recommend/user!"))
             .andExpect(status().isBadRequest());
     }
 
@@ -180,7 +187,7 @@ class RecommendationControllerTest {
             new RecommendationResult("u1", List.of(), List.of(), List.of(), Map.of())
         );
 
-        mockMvc.perform(get("/recommend/u1?limit=999"))
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1?limit=999"))
             .andExpect(status().isOk());
     }
 
@@ -197,7 +204,7 @@ class RecommendationControllerTest {
             ))
         );
 
-        mockMvc.perform(get("/predict/user_employee_01/action_benefits"))
+        mockMvc.perform(get("/api/v1/retrieval/predict/user_employee_01/action_benefits"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.model").value("mlp_embedding"))
             .andExpect(jsonPath("$.user").value("user_employee_01"))
@@ -212,7 +219,7 @@ class RecommendationControllerTest {
         when(predictionService.predict("missing", "action_benefits")).thenReturn(java.util.Optional.empty());
         when(predictionService.metadata()).thenReturn(Map.of("model", "mlp_embedding", "users", 32, "items", 12));
 
-        mockMvc.perform(get("/predict/missing/action_benefits"))
+        mockMvc.perform(get("/api/v1/retrieval/predict/missing/action_benefits"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.error").value("unknown_user_or_item"))
             .andExpect(jsonPath("$.metadata.users").value(32));
@@ -224,7 +231,7 @@ class RecommendationControllerTest {
             new ModelPrediction(null, null, 0L, 1L, 0.61, "mlp_embedding")
         );
 
-        mockMvc.perform(get("/predict/id?userId=0&itemId=1"))
+        mockMvc.perform(get("/api/v1/retrieval/predict/id?userId=0&itemId=1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.model").value("mlp_embedding"))
             .andExpect(jsonPath("$.userId").value(0))
@@ -238,7 +245,7 @@ class RecommendationControllerTest {
             "Model indices out of range: userId must be 0..31 and itemId must be 0..11"
         ));
 
-        mockMvc.perform(get("/predict/id?userId=0&itemId=42"))
+        mockMvc.perform(get("/api/v1/retrieval/predict/id?userId=0&itemId=42"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value(
                 "Model indices out of range: userId must be 0..31 and itemId must be 0..11"
@@ -249,7 +256,7 @@ class RecommendationControllerTest {
     void feedbackEndpointAcceptsLegacyFourFieldBody() throws Exception {
         when(recommendationService.recordFeedback(any())).thenReturn(Map.of("status", "ok", "clicked", true));
 
-        mockMvc.perform(post("/feedback")
+        mockMvc.perform(post("/api/v1/retrieval/feedback")
                 .contentType("application/json")
                 .content("{\"user\":\"u1\",\"item\":\"item4\",\"clicked\":true,\"reward\":1.0}"))
             .andExpect(status().isOk())
@@ -263,7 +270,7 @@ class RecommendationControllerTest {
     void feedbackEndpointAcceptsEnrichedMeasurementFields() throws Exception {
         when(recommendationService.recordFeedback(any())).thenReturn(Map.of("status", "ok"));
 
-        mockMvc.perform(post("/feedback")
+        mockMvc.perform(post("/api/v1/retrieval/feedback")
                 .contentType("application/json")
                 .content("""
                     {
@@ -306,7 +313,7 @@ class RecommendationControllerTest {
     }
 
     private void invalidFeedbackFieldIsRejected(String invalidField) throws Exception {
-        mockMvc.perform(post("/feedback")
+        mockMvc.perform(post("/api/v1/retrieval/feedback")
                 .contentType("application/json")
                 .content("{\"user\":\"u1\",\"item\":\"item1\",\"clicked\":true,\"reward\":1.0,"
                     + invalidField + "}"))
@@ -336,7 +343,7 @@ class RecommendationControllerTest {
         when(measurementService.snapshot()).thenReturn(new MeasurementSnapshot(
             "2.1", Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
 
-        mockMvc.perform(get("/metrics"))
+        mockMvc.perform(get("/api/v1/retrieval/metrics"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.ctr").value(0.25))
             .andExpect(jsonPath("$.requests").value(4))
@@ -349,37 +356,48 @@ class RecommendationControllerTest {
             new RecommendationResult("u1", List.of(), List.of(), List.of(), Map.of())
         );
 
-        mockMvc.perform(get("/recommend/u1"))
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1"))
             .andExpect(status().isOk());
 
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(false), eq(false));
     }
 
+    // The service failures below used to escape MockMvc as thrown exceptions, because the
+    // isolated retrieval app had no @ControllerAdvice in scope. Now that this controller is
+    // assembled into ModelApplication, GlobalExceptionHandler's catch-all is in scope for every
+    // @WebMvcTest slice too (Spring Boot auto-detects @ControllerAdvice for the slice regardless
+    // of an explicit @Import), so the same failures are resolved to a 500 instead of propagating.
+    // The measurement recording under test happens in the controller's own finally block before
+    // the exception ever reaches that advice, so the assertion on it is unaffected.
+
     @Test
-    void recommendEndpointRecordsTimeoutAsAnErrorAndTimeout() {
+    void recommendEndpointRecordsTimeoutAsAnErrorAndTimeout() throws Exception {
         when(recommendationService.recommend("u1", 6)).thenThrow(new IllegalStateException(new TimeoutException()));
 
-        assertThrows(Exception.class, () -> mockMvc.perform(get("/recommend/u1")));
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1"))
+            .andExpect(status().isInternalServerError());
 
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(true), eq(true));
     }
 
     @Test
-    void recommendEndpointRecordsNonTimeoutServiceErrorWithoutTimeoutFlag() {
+    void recommendEndpointRecordsNonTimeoutServiceErrorWithoutTimeoutFlag() throws Exception {
         when(recommendationService.recommend("u1", 6)).thenThrow(new IllegalStateException("service failed"));
 
-        assertThrows(Exception.class, () -> mockMvc.perform(get("/recommend/u1")));
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1"))
+            .andExpect(status().isInternalServerError());
 
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(true), eq(false));
     }
 
     @Test
-    void feedbackEndpointRecordsTimeoutAsAnErrorAndTimeout() {
+    void feedbackEndpointRecordsTimeoutAsAnErrorAndTimeout() throws Exception {
         when(recommendationService.recordFeedback(any())).thenThrow(new IllegalStateException(new TimeoutException()));
 
-        assertThrows(Exception.class, () -> mockMvc.perform(post("/feedback")
+        mockMvc.perform(post("/api/v1/retrieval/feedback")
             .contentType("application/json")
-            .content("{\"user\":\"u1\",\"item\":\"item1\",\"clicked\":true,\"reward\":1.0}")));
+            .content("{\"user\":\"u1\",\"item\":\"item1\",\"clicked\":true,\"reward\":1.0}"))
+            .andExpect(status().isInternalServerError());
 
         verify(measurementService).recordRequest(eq("feedback"), any(Duration.class), eq(true), eq(true));
     }
@@ -393,9 +411,9 @@ class RecommendationControllerTest {
         when(predictionService.metadata()).thenReturn(Map.of("model", "test"));
         when(userProfileClient.getProfile("u1")).thenReturn(Optional.of(profile("u1")));
 
-        mockMvc.perform(get("/predict/u1/i1")).andExpect(status().isOk());
-        mockMvc.perform(get("/users/u1/profile")).andExpect(status().isOk());
-        mockMvc.perform(get("/embedding/i1")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/retrieval/predict/u1/i1")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/retrieval/users/u1/profile")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/retrieval/embedding/i1")).andExpect(status().isOk());
 
         verify(measurementService).recordRequest(eq("predict"), any(Duration.class), eq(false), eq(false));
         verify(measurementService).recordRequest(eq("profile"), any(Duration.class), eq(false), eq(false));
@@ -406,7 +424,7 @@ class RecommendationControllerTest {
     void treatsAnUnknownProfileAsAbsentRatherThanAServerError() throws Exception {
         when(userProfileClient.getProfile("nobody")).thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/users/nobody/profile")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/retrieval/users/nobody/profile")).andExpect(status().isNotFound());
 
         verify(measurementService).recordRequest(eq("profile"), any(Duration.class), eq(false), eq(false));
     }

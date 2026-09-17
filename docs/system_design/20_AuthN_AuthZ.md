@@ -132,6 +132,18 @@ That boundary rule is also the trap: a bare `/api/catalog` entry *would* match
   have exposed a protected prefix — the guard silently saving you is itself a
   misconfiguration worth fixing.
 
+`BackendRoutePolicy.userScopedGatewayPaths` — the thing `PROTECTED_PREFIXES` derives from — used
+to walk only the `EXACT` table. That was invisible as long as every `USER_SCOPED` entry was
+declared exactly. The retrieval merge added this repo's first `USER_SCOPED` entries in the
+`PREFIX` table (`/api/v1/retrieval/recommend`, `.../predict`, `.../users`, all
+`userScoped(UserIdSource.PATH)`), because those three are path templates, not paths, for the same
+reason `/api/v1/knowledge-bases` is a prefix entry below. An `EXACT`-only
+`userScopedGatewayPaths` would not have seen them, so `noUserScopedRouteCanBeMadePublic` — the test
+guarding exactly this — would have stayed green even if `GATEWAY_PUBLIC_PATHS` listed one of them:
+the route would have gone anonymous, hence service-tier, hence exempt from §10's check, with the
+guard reporting nothing wrong. `userScopedGatewayPaths` now walks both tables, and a second test,
+`userScopedGatewayPathsIncludesPrefixDeclaredRoutes`, pins that it continues to.
+
 Version segments cannot be used to evade either mechanism. The gateway normalizes
 `/api/v1/users` to `/api/users` *before* `authenticator.check` runs (see
 [09_API_Gateway §1](09_API_Gateway.md#api-versioning-and-deprecation)), so `PROTECTED_PREFIXES`
@@ -427,10 +439,11 @@ and `/api/catalog` all resolve to 6010 and `MicroserviceRoute.rewrite` forwards 
 verbatim, so one handler is reachable under three prefixes. (This is one access class among four —
 `NO_PROXY`, `OPERATOR`, `USER_SCOPED`, `AUTHENTICATED` — that `BackendRoutePolicy` assigns to every
 backend route; §11 covers the table as a whole. This section covers only the `USER_SCOPED` class,
-which absorbed the entire remit of the former, single-purpose `UserScopedRoutes` class.) Three
+which absorbed the entire remit of the former, single-purpose `UserScopedRoutes` class.) Five
 source kinds cover every user-scoped route: `QUERY` (a query-string parameter), `BODY` (a
-top-level `userId` field), and `BODY_INSTANCES` (every element of a TF-Serving-shaped
-`instances[]` array must name the same user). The third kind exists because
+top-level `userId` field), `BODY_INSTANCES` (every element of a TF-Serving-shaped
+`instances[]` array must name the same user), and — added by the retrieval merge, see §11 —
+`PATH` (a path segment) and `BODY_USER` (a top-level `user` field). The third kind exists because
 `POST /v1/models/recmodel:predict` turned out to be user-scoped: `PredictInstance` carries a
 caller-supplied `userId`, and `PairPredictionService` loads `u2vEmb:<userId>` and returns scores
 derived from it — a fact the route had first been excused past, and only the conformance test
@@ -626,6 +639,76 @@ caller is being told to present a credential, not that the path is absent. The g
 `SHARD_ADMIN_TOKEN` from the `recsys-online-admin` Secret (`k8s/base/api-gateway.yaml`, mirroring
 `k8s/base/online-serving.yaml`'s existing wiring for 7010) and warns at startup when it is unset;
 unset means the guard authorizes nobody, so every `OPERATOR` route fails closed rather than open.
+
+**Two more `OPERATOR` routes arrived with the retrieval service merge, and both were previously
+unauthenticated.** The retrieval code was copied into 8080 as a foreign island with no gateway
+awareness at all — `POST /api/v1/retrieval/model/reload` (reloads the live ONNX session, the same
+class of mutation as `/api/v1/model/versions/activate`) and `/api/v1/retrieval/profile-audit`
+(walks every user's profile and preferences) both landed with zero guard. Both are now classified
+`OPERATOR` in `BackendRoutePolicy`, so they inherit the same `X-Admin-Token` requirement — which
+means the standing constraint above is now load-bearing for retrieval too: **`SHARD_ADMIN_TOKEN`
+must be deployed before this image ships**, or these two routes, along with the pre-existing four,
+reject every caller with 403.
+
+The reload route surfaces a subtlety worth stating explicitly, because it is the kind of thing a
+future reader would otherwise only discover by tracing reachability by hand: in the incoming
+service it lived at `POST /actuator/model-reload`, and `/actuator` is already declared `NO_PROXY`
+for `recsys-model-serving` — the gateway refuses to proxy it today. Moving the route out from under
+`/actuator` to `/api/v1/retrieval/model/reload` therefore *increases* its reachability rather than
+decreasing it: an unclassified path outside `/actuator` is not silently protected the way an
+unclassified path inside it would be, it is simply denied by the allow-list default until
+classified, then reachable once classified. That is precisely why the move and the `OPERATOR`
+classification had to land in the same commit — landing the move first, even briefly, would have
+made the route reachable by any authenticated caller with no operator check at all.
+
+**`UserIdSource` gained a fourth member, `PATH`, because three retrieval routes carry the userId in
+a path segment** — `/api/v1/retrieval/recommend/{user}`, `/api/v1/retrieval/predict/{user}/{item}`,
+and `/api/v1/retrieval/users/{user}/profile` — and the existing three sources (`QUERY`, `BODY`,
+`BODY_INSTANCES`) have no way to read one. The alternative considered was classifying these routes
+`AUTHENTICATED` instead of `USER_SCOPED`: it would have compiled and every existing test would have
+stayed green, because nothing in the suite exercises cross-user path substitution. It would also
+have let any authenticated caller read another user's recommendations or profile simply by editing
+the `{user}` segment of an otherwise-ordinary request. `UserIdSource.PATH` closes that gap by giving
+these three routes a real `USER_SCOPED` classification instead of a permissive one chosen for
+convenience.
+
+**A fifth member, `BODY_USER`, followed — the feedback route's body spells the subject `user`, not
+`userId`.** `POST /api/v1/retrieval/feedback` deserializes into `FeedbackRequest`, whose field is
+`user`, and `HybridRecommendationService.recordFeedback` acts on `request.user()`. Classified
+`userScoped(UserIdSource.BODY)` it read a `userId` field that body never carries, which failed in
+both directions at once: every honest call extracted `""` and was denied 403, and a body naming
+*both* keys — `{"userId":"<caller>","user":"<victim>"}` — passed the gateway on the key the backend
+ignores. Spring's Jackson disables `FAIL_ON_UNKNOWN_PROPERTIES` (a bare `ObjectMapper` does not, so
+the difference is invisible in a unit test that builds its own mapper), so `userId` was dropped
+silently and the bandit counters, Q-values, reward totals and replay buffer were written as the
+victim. The fix reads the field the handler reads. The general lesson is that a source's field name
+is a property of the *route's request type*, not a repo-wide constant: `UserIdSource.PARAM`'s
+javadoc used to assert `userId` was universal, and it no longer is. `UserIdSourceTest` now
+serializes a real `FeedbackRequest` with Jackson and runs those bytes through the source, because
+what let this ship green was that no test had ever fed a real request body through the policy.
+
+**`/api/v1/retrieval/predict/id` and `/predict/metadata` are `NO_PROXY`, not `AUTHENTICATED`,
+because the first is an unscoped alias for a user-scoped route.**
+`RetrievalRecommendationController.predictById` reaches the same
+`predictionService.predict(userId, itemId)` as the templated `/predict/{user}/{item}` that the
+`PATH` prefix above scopes — addressed by raw model indices instead of account ids. As
+`AUTHENTICATED` it handed a user-tier caller the exact score they had just been 403'd for on the
+templated spelling, and the indices are dense and bounded by `userLookup.size()`, so they enumerate
+rather than having to be guessed; `/predict/metadata` publishes that bound. Both are debug/index
+surfaces with no client need through the gateway, and the whole retrieval surface is new to it, so
+refusing to proxy them regresses nothing. They can be promoted later, deliberately, with a
+user-scope story — which is a different thing from having been classified permissively by default.
+
+**The model-reload route is now guarded twice, like 7010's operator surfaces.**
+`BackendRoutePolicy` classifying `POST /api/v1/retrieval/model/reload` as `OPERATOR` binds only
+callers who arrive through the gateway; anything with in-cluster reach to 8080 skipped it entirely
+and could swap the live ONNX session. `ModelReloadController` now performs its own `AdminTokenGuard`
+check on the same `SHARD_ADMIN_TOKEN`, matching the precedent of `POST /shards/topology` and
+`GET /online/ops`, which `ShardedRecordService` guards in-process *and* the table classifies
+`OPERATOR`. The guard's fail-closed semantics carry over: unset token authorizes nobody, so the
+route returns 403 rather than staying open. `k8s/base/model-serving.yaml` therefore now reads
+`SHARD_ADMIN_TOKEN` from the same `recsys-online-admin` Secret (`optional: true`) that the gateway
+and online serving already read.
 
 **`/shards` stays `AUTHENTICATED`, not `OPERATOR`, because the prefix mixes tiers.**
 [`ShardedRecordService`](../../src/main/java/com/recsys/infrastructure/store/ShardedRecordService.java)

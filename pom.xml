@@ -750,9 +750,13 @@
                      tests moved with them and would otherwise fall outside the pattern above. -->
                 <include>**/com/recsys/api/rest/retrieval/**/*Test.java</include>
               </includes>
-              <!-- UserProfileIntegrationTest is @Tag("docker") and cannot run on arm64 CI;
-                   docker-java pins API version 1.32 through every configuration surface reachable
-                   from this project, so it is skipped rather than failed. -->
+              <!-- Note UserProfileIntegrationTest is NOT excluded by this. It carries
+                   @Testcontainers(disabledWithoutDocker = true), not @Tag("docker"), so it skips
+                   only where no Docker daemon exists and RUNS on CI, which has one. That is
+                   deliberate: it is the only end-to-end coverage of the retrieval path against a
+                   real Redis, and it is what caught this profile's first regression — the route
+                   versioning had moved the controller to /api/v1/retrieval while the test still
+                   called the root-level paths, invisible because nothing had ever executed it. -->
               <excludedGroups>load,docker</excludedGroups>
             </configuration>
           </plugin>

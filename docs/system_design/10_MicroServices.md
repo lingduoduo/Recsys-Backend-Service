@@ -145,6 +145,32 @@ The economy of one codebase shows up as genuinely shared building blocks:
   and root `/v2/…`. The gateway's own prefixes carry no version at all, so the edge
   contract and the backend contracts version independently — or, in practice, don't.
   See [09_API_Gateway §1](09_API_Gateway.md#1-routing-and-prefix-strip).
+- **Four services, not five.** A complete second Spring Boot application — the retrieval
+  service, ~17,000 lines under `com.recsys.retrieval.*` — was merged into `ModelApplication`
+  rather than deployed on its own port: `RetrievalServiceApplication` is deleted, and
+  `com.recsys.retrieval` is added to `ModelApplication`'s `scanBasePackages`, so 8080 now serves
+  the ONNX two-tower model and the retrieval surface from one JVM. Two residuals are worth
+  knowing about rather than rediscovering by reading the tree. First, `com.recsys.retrieval.*`
+  is feature-shaped — its own controller/service/repository layout — inside a codebase whose
+  packages are otherwise role-shaped; folding it into `api/`/`application/`/`domain/`/
+  `infrastructure/` is deliberately deferred (it touches every file twice, over code whose tests
+  had not been run once before the merge) and filed as a follow-up. Its three Spring
+  controllers are the one exception, relocated to `com/recsys/api/rest/retrieval` because
+  `BackendRouteCoverageTest` fails the build on any `@RestController` outside
+  `com/recsys/api/rest` — the drop-in tripped this immediately, since without that scan a
+  controller could ship reachable but unclassified by the gateway's route policy (see
+  [20_AuthN_AuthZ §11](20_AuthN_AuthZ.md#11-the-gateway-proxy-policy--what-the-gateway-is-willing-to-forward)).
+  Second, **two Redis client stacks now coexist in the 8080 JVM.** The retrieval code's 28
+  call sites use Spring Data Redis's `StringRedisTemplate`; the rest of 8080 uses the
+  hand-built `LettuceClientFactory` stack. Rather than porting those 28 call sites onto
+  `RedisExecutor` (also deferred), a bridge — `RetrievalRedisConfig` — excludes
+  `RedisAutoConfiguration` and builds the `StringRedisTemplate` from the same `recsys.redis`
+  `RedisProperties` through `LettuceClientFactory`. Both stacks are therefore configured from
+  the same `recsys.redis.*` keys and both sit behind the same `REDIS_ALLOW_NO_AUTH` /
+  `LettuceClientFactory.requireAuthentication` credential guard — letting Spring
+  autoconfigure a second connection pool from `spring.data.redis.*` instead would have created
+  one the guard cannot see, making an existing security control bypassable on 8080. Design:
+  [retrieval service consolidation](../superpowers/specs/2026-09-16-retrieval-service-consolidation-design.md).
 
 ### Why not gRPC (and why not bidirectional streaming)
 
@@ -216,3 +242,25 @@ compile-excludes rather than an automated rule.
 5. **The gateway is a shared fate.** Independent backends still funnel through one
    edge, so gateway availability is covered separately —
    [API Gateway](09_API_Gateway.md) and [Fault Tolerance](18_Fault_Tolerance.md).
+6. **Merging into `ModelApplication` changed the retrieval routes' error behaviour, not just
+   their reachability.** `GlobalExceptionHandler` is a `@RestControllerAdvice`, so it is picked
+   up by component scan the moment the retrieval controllers moved into
+   `ModelApplication`'s scanned packages — something the standalone retrieval service never
+   had. Concretely, `IllegalArgumentException` is now converted to a `400` that echoes
+   `ex.getMessage()` back to the caller, where the standalone service let it propagate (and,
+   depending on its own error handling, likely surfaced a `500` or a container default page
+   instead). The retrieval tree throws `IllegalArgumentException` in 33 places, so this is a
+   real, broad behavioural difference between "the same code running standalone" and "the same
+   code running merged" — not a bug introduced by the merge, but a change worth knowing about
+   before comparing the two.
+7. **`-parameters` does not survive an incremental recompile, and the retrieval controllers
+   depend on it.** `pom.xml`'s `maven-compiler-plugin` sets `<parameters>true</parameters>`
+   because this project has no `spring-boot-starter-parent` to supply it, and Spring MVC needs
+   it to bind `@PathVariable`/`@RequestParam` by name when no explicit name is given. The flag's
+   effect does not survive `maven-compiler-plugin`'s incremental recompile, though: a non-clean
+   `mvn test` after touching only a few files was observed to fail 17 of the 27 retrieval
+   controller tests, while a clean build of the same tree passed all of them. The retrieval
+   controllers were written to name every `@PathVariable`/`@RequestParam` binding explicitly
+   (`@PathVariable("user")`, not bare `@PathVariable`) specifically so request binding does not
+   depend on `-parameters` taking effect — a `mvn clean test` is still the reliable way to
+   verify this project, incremental or not.

@@ -215,6 +215,10 @@ recsys:
     candidate-generation:
       popularity-fetch-multiplier: ${RECSYS_POPULARITY_FETCH_MULTIPLIER:5}
       cold-start-pool-size: ${RECSYS_COLD_START_POOL_SIZE:25}
+      # Inert: no field on RecommendationProperties.CandidateGeneration binds this key today,
+      # and nothing in src/main or src/test reads RECSYS_RANDOMIZATION_POOL. Carried over
+      # verbatim from the origin service's config; left in place as a signal of intended
+      # behaviour rather than deleted. Setting the env var has no effect.
       top-n-randomization-pool: ${RECSYS_RANDOMIZATION_POOL:5}
     filtering:
       enabled: ${RECSYS_FILTERING_ENABLED:true}

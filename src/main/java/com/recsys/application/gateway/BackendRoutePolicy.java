@@ -111,9 +111,23 @@ final class BackendRoutePolicy {
                     Map.entry("/health/ready", of(Access.NO_PROXY)),
                     // The /api/v1/retrieval surface. Only the paths with no template segment can
                     // be spelled exactly; the other four live in PREFIX below.
-                    Map.entry("/api/v1/retrieval/predict/id", of(Access.AUTHENTICATED)),
-                    Map.entry("/api/v1/retrieval/predict/metadata", of(Access.AUTHENTICATED)),
-                    Map.entry("/api/v1/retrieval/feedback", userScoped(UserIdSource.BODY)),
+                    //
+                    // /predict/id is an UNSCOPED ALIAS for the user-scoped templated route: it
+                    // reaches the same predictionService.predict(userId, itemId) as
+                    // /predict/{user}/{item}, addressed by raw model indices instead of account
+                    // ids. Classified AUTHENTICATED it would hand any authenticated caller the
+                    // score they were just 403'd for on the templated spelling — and the indices
+                    // are dense and bounded by userLookup.size(), so they enumerate rather than
+                    // having to be guessed. /predict/metadata publishes that bound. Both are
+                    // debug/index surfaces with no client need through the gateway and the whole
+                    // retrieval surface is new to it, so NO_PROXY regresses nothing. Promote them
+                    // deliberately, with a user-scope story, or not at all.
+                    Map.entry("/api/v1/retrieval/predict/id", of(Access.NO_PROXY)),
+                    Map.entry("/api/v1/retrieval/predict/metadata", of(Access.NO_PROXY)),
+                    // BODY_USER, not BODY: FeedbackRequest's field is `user`. BODY read `userId`,
+                    // which this body never carries — denying every honest call while a body
+                    // naming both keys passed on the one the backend ignores.
+                    Map.entry("/api/v1/retrieval/feedback", userScoped(UserIdSource.BODY_USER)),
                     Map.entry("/api/v1/retrieval/metrics", of(Access.NO_PROXY)),
                     // Reloads the live ONNX session — the same class of mutation as
                     // /api/v1/model/versions/activate, and it arrived from the retrieval drop-in
@@ -165,7 +179,7 @@ final class BackendRoutePolicy {
                     //
                     // /api/v1/retrieval/predict sits above the exact /predict/id and
                     // /predict/metadata entries, which name no user. Exact is tried first, so
-                    // those two still resolve AUTHENTICATED; the prefix governs
+                    // those two still resolve to their own NO_PROXY entries; the prefix governs
                     // /predict/{user}/{item} alone.
                     "/api/v1/retrieval/recommend", userScoped(UserIdSource.PATH),
                     "/api/v1/retrieval/predict", userScoped(UserIdSource.PATH),

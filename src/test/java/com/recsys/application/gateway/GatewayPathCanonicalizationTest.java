@@ -102,6 +102,37 @@ class GatewayPathCanonicalizationTest {
     }
 
     /**
+     * The retrieval routes read the userId from a path <em>segment</em>
+     * ({@code UserIdSource.PATH}), which reads the segment after the first {@code recommend},
+     * {@code predict} or {@code users} marker anywhere in the path. On its own that would let
+     * {@code /api/retrieval/api/v1/retrieval/recommend/<own>/../../users/<victim>/profile} name
+     * the caller's own id to the gateway and a victim's to the backend — the id the check reads
+     * and the id the handler acts on would be different strings.
+     *
+     * <p>It cannot: this guard runs before routing, so the traversal spelling never reaches the
+     * policy lookup at all. Pinned here rather than re-architecting {@code PATH}, because this is
+     * the protection that actually holds — and if it is ever relaxed, {@code PATH}'s
+     * first-marker rule becomes a live cross-user read, not a style question.
+     */
+    @Test
+    void aTraversalSpellingOfARetrievalPathIsRejectedBeforeRouting() {
+        String traversal = "/api/retrieval/api/v1/retrieval/recommend/1/../../users/2/profile";
+        // Two layers, as above: Armeria refuses to build the context at all, and the guard would
+        // have caught it anyway if that upstream behaviour ever changed.
+        assertThrows(IllegalArgumentException.class, () -> serve(traversal));
+        assertTrue(GatewayProxyService.hasNonCanonicalSegment(traversal));
+        assertThrows(IllegalArgumentException.class,
+                () -> serve("/api/retrieval/api/v1/retrieval/recommend/1/%2e%2e/users/2/profile"));
+        assertThrows(IllegalArgumentException.class,
+                () -> serve("/api/retrieval/api/v1/retrieval/recommend/1/%2E%2E/users/2/profile"));
+        // An encoded separator hides a segment boundary from every gateway control while a
+        // backend that decodes it sees two segments — the same disagreement, spelled differently.
+        // Armeria leaves this one encoded, so it is the gateway's own 400 that closes it.
+        assertRejected("/api/retrieval/api/v1/retrieval/recommend/1%2Fusers%2F2");
+        assertRejected("/api/retrieval/api/v1/retrieval/recommend/1%2fusers%2f2");
+    }
+
+    /**
      * The rejection is the gateway's own 400, not a 404 from route matching — proving it runs
      * before routing, which is what also keeps rate-limit keying and the CDN cache key off the
      * non-canonical spelling.

@@ -49,6 +49,12 @@ import java.util.stream.Collectors;
  *
  * <p>Consequence worth knowing: {@code spring.data.redis.*} is inert in this application. Tests
  * that point at an ephemeral Redis must set {@code recsys.redis.host} / {@code recsys.redis.port}.
+ *
+ * <p>It also honours only part of {@code recsys.redis}: {@code replica-nodes} and the whole
+ * {@code pool} block are read by the raw-Lettuce path in {@link RedisConfig} and ignored here, so
+ * the retrieval template always talks to the primary through Lettuce's own shared connection
+ * rather than a configured pool or a replica. Tuning either property changes the executors'
+ * behaviour and not this template's.
  */
 @Configuration
 public class RetrievalRedisConfig {

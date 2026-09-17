@@ -44,6 +44,38 @@ enum UserIdSource {
     },
 
     /**
+     * The same top-level scalar read as {@link #BODY}, but from the JSON field {@code user}.
+     *
+     * <p>It exists because {@code /api/v1/retrieval/feedback} deserializes into
+     * {@code FeedbackRequest}, whose field is named {@code user}, not {@code userId} — and
+     * {@code HybridRecommendationService.recordFeedback} acts on {@code request.user()}. A field
+     * name that disagrees with the one the handler reads is not a compile error here; it is a
+     * silently wrong authorization decision, and it fails in <em>both</em> directions at once.
+     * {@link #BODY} on this route read {@code ""} from every honest body and 403'd it, while a
+     * body carrying both keys — {@code {"userId":"<caller>","user":"<victim>"}} — passed the
+     * gateway on the key the backend ignores, and Spring's Jackson (which, unlike a bare
+     * {@code ObjectMapper}, disables {@code FAIL_ON_UNKNOWN_PROPERTIES}) dropped {@code userId}
+     * and wrote bandit counters, Q-values, reward totals and the replay buffer as the victim.
+     *
+     * <p>Renaming the record field would have fixed it too, at the cost of breaking a published
+     * wire contract; reading the right field costs nothing.
+     */
+    BODY_USER {
+        @Override
+        String extract(String targetPath, AggregatedHttpRequest request) {
+            try {
+                JsonNode root = MAPPER.readTree(request.contentUtf8());
+                if (root == null || !root.isObject()) {
+                    return "";
+                }
+                return scalarText(root.get(USER_PARAM));
+            } catch (Exception e) {
+                return "";
+            }
+        }
+    },
+
+    /**
      * A TF-Serving-shaped batch: {@code {"instances":[{"userId":1,"movieId":2}, ...]}}. The id is
      * inside the array elements, not at the top level, so {@link #BODY} would read {@code ""} here
      * and deny every legitimate call while looking like a working control.
@@ -113,8 +145,17 @@ enum UserIdSource {
         }
     };
 
-    /** The parameter and JSON field name is `userId` on every route in the table. */
+    /**
+     * The query-parameter and JSON field name {@link #QUERY}, {@link #BODY} and
+     * {@link #BODY_INSTANCES} read. It is <em>not</em> universal: the retrieval routes spell the
+     * subject differently — as a path segment ({@link #PATH}) or as the JSON field {@code user}
+     * ({@link #BODY_USER}). Which name a route uses is a property of that route's request type,
+     * so check the handler's body class before reusing a source on a new route.
+     */
     static final String PARAM = "userId";
+
+    /** {@link #BODY_USER}'s field name — {@code FeedbackRequest.user}. */
+    static final String USER_PARAM = "user";
 
     /**
      * The segments {@link #PATH} reads an id from — the segment that follows one of these is the

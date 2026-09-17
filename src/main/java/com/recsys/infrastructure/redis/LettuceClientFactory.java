@@ -31,6 +31,10 @@ public final class LettuceClientFactory {
     static final int DEFAULT_MIN_IDLE    = 2;
     static final int DEFAULT_MAX_WAIT_MS = 250;
     static final int DEFAULT_TIMEOUT_MS  = 2000; // matches Jedis Protocol.DEFAULT_TIMEOUT
+    /** Redis data port — the fallback for a standalone endpoint, never for a sentinel one. */
+    static final int DEFAULT_PORT          = 6379;
+    /** Redis Sentinel port. */
+    static final int DEFAULT_SENTINEL_PORT = 26379;
 
     private LettuceClientFactory() {}
 
@@ -206,7 +210,7 @@ public final class LettuceClientFactory {
             return sentinelUri(master, nodes, username, password, tls, timeoutMs);
         }
         return standaloneUri(env.getOrDefault("REDIS_HOST", "localhost"),
-                parsePort(env.getOrDefault("REDIS_PORT", "6379")), username, password, tls, timeoutMs);
+                parsePort(env.getOrDefault("REDIS_PORT", "6379"), DEFAULT_PORT), username, password, tls, timeoutMs);
     }
 
     static RedisURI uriFrom(RedisProperties props) {
@@ -252,9 +256,9 @@ public final class LettuceClientFactory {
             if (node.isEmpty()) continue;
             int c = node.lastIndexOf(':');
             if (c > 0) {
-                b = b.withSentinel(node.substring(0, c), parsePort(node.substring(c + 1)));
+                b = b.withSentinel(node.substring(0, c), parsePort(node.substring(c + 1), DEFAULT_SENTINEL_PORT));
             } else {
-                b = b.withSentinel(node, 26379);
+                b = b.withSentinel(node, DEFAULT_SENTINEL_PORT);
             }
         }
         b = withAuth(b, username, password);
@@ -308,12 +312,24 @@ public final class LettuceClientFactory {
         return p;
     }
 
-    static int parsePort(String value) {
-        if (value == null) return 6379;
+    /**
+     * Parses a port, falling back to the caller's default when the value is absent or not a
+     * number.
+     *
+     * <p>The fallback is the caller's because the two call sites need different ones: a
+     * standalone endpoint defaults to the data port, a sentinel endpoint to {@code 26379}. This
+     * method used to hard-code {@code 6379} for both, so a typo in {@code REDIS_SENTINEL_NODES}
+     * — {@code "sentinel-a:"} or {@code "sentinel-a:abc"} — silently pointed the client at the
+     * Redis data port instead of a sentinel, and failed later in a way that did not name the
+     * cause. {@link #sentinelUri} already used {@code 26379} for a node written with no colon at
+     * all, so one method defaulted two different ways for the same class of malformed input.
+     */
+    static int parsePort(String value, int fallback) {
+        if (value == null) return fallback;
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
-            return 6379;
+            return fallback;
         }
     }
 

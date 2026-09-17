@@ -92,11 +92,11 @@ class RetrievalRedisConfigTest {
     }
 
     /**
-     * LettuceClientFactory.parsePort falls back to 6379 (the Redis data port, not the sentinel
-     * port) on an unparseable port string, which would silently misdirect a sentinel client.
-     * The bridge deliberately does not mirror that fallback: a trailing-colon entry like this
-     * one must be rejected outright, with a message that names the property and the offending
-     * value rather than a generic failure from inside Spring Data.
+     * The raw-Lettuce path guesses a port for a malformed entry — 26379 since parsePort began
+     * taking its fallback from the caller. The bridge deliberately does not guess: a
+     * trailing-colon entry like this one is rejected outright, with a message that names the
+     * property and the offending value, rather than being papered over or surfacing as a generic
+     * failure from inside Spring Data.
      */
     @Test
     void rejectsASentinelNodeWithATrailingColonAndNoPort() {

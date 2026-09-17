@@ -1,0 +1,36 @@
+# Merge gate for the retrieval service consolidated in from the standalone
+# java-retrieval-service (PRs #331/#332): 56 test classes, ~343 tests.
+#
+# Separate from resilience-pr on purpose. That job runs a curated allow-list where each entry
+# guards a named resilience or security property; these are ordinary feature tests for one
+# subsystem. Keeping them apart means a red check says which kind of thing broke.
+#
+# Measured: `-Presilience` does NOT cover this code. Dropping `.reversed()` from
+# EvaluationPolicy.greedy — so it picks the worst-scoring item instead of the best — leaves
+# resilience-pr green at 958 tests and fails this job. That gap is why this workflow exists.
+name: retrieval-pr
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retrieval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - run: mvn --batch-mode -Pretrieval test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retrieval-pr-surefire
+          path: target/surefire-reports/

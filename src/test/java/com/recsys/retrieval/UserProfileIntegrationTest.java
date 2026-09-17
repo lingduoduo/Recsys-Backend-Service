@@ -107,7 +107,7 @@ class UserProfileIntegrationTest {
         redis.opsForValue().set(PROFILE_KEY, fixtureJson);
         redis.opsForValue().set(ACTIVE_RUN_KEY, RUN_ID);
 
-        mockMvc.perform(get("/users/{user}/profile", USER_ID))
+        mockMvc.perform(get("/api/v1/retrieval/users/{user}/profile", USER_ID))
             .andExpect(status().isOk())
             .andExpect(content().contentTypeCompatibleWith("application/json"))
             .andExpect(jsonPath("$.user_id").value(USER_ID))
@@ -143,7 +143,7 @@ class UserProfileIntegrationTest {
     }
 
     private List<String> recommendationOrder(String userId) throws Exception {
-        String response = mockMvc.perform(get("/recommend/{user}", userId).param("limit", "2"))
+        String response = mockMvc.perform(get("/api/v1/retrieval/recommend/{user}", userId).param("limit", "2"))
             .andExpect(status().isOk())
             .andReturn()
             .getResponse()

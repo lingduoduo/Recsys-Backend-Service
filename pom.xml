@@ -715,6 +715,54 @@
         </plugins>
       </build>
     </profile>
+    <!--
+      Merge gate for the retrieval service consolidated in from the standalone
+      java-retrieval-service (PRs #331/#332). 56 test classes, ~343 tests, ~100s.
+
+      Deliberately its own profile rather than 56 more entries in `resilience`. That profile is a
+      curated allow-list where each include earns its place by guarding a specific resilience or
+      security property, and every entry carries a comment saying what breaks without it. These
+      are ordinary feature tests for one subsystem: folding them in would double the list and
+      dilute what membership means. Two profiles, two questions — "does the system still degrade
+      and authorize correctly" and "does retrieval still work".
+
+      Without this gate the 50-odd classes that are not individually named in `resilience` run
+      only on a full `mvn test`, which no pull request executes, so a change could break them and
+      merge green.
+    -->
+    <profile>
+      <id>retrieval</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+              <includes>
+                <!-- Service, model, config, measurement, evaluation, kafka, event and support
+                     tests. Package-shaped rather than per-class on purpose: a new test added
+                     under these roots is gated automatically, where the resilience profile's
+                     per-class list would silently leave it out. -->
+                <include>**/com/recsys/retrieval/**/*Test.java</include>
+                <!-- The three controllers live in api/rest/retrieval, because
+                     BackendRouteCoverageTest requires every Spring controller under
+                     src/main/java/com/recsys/api/rest so no route can ship unclassified. Their
+                     tests moved with them and would otherwise fall outside the pattern above. -->
+                <include>**/com/recsys/api/rest/retrieval/**/*Test.java</include>
+              </includes>
+              <!-- Note UserProfileIntegrationTest is NOT excluded by this. It carries
+                   @Testcontainers(disabledWithoutDocker = true), not @Tag("docker"), so it skips
+                   only where no Docker daemon exists and RUNS on CI, which has one. That is
+                   deliberate: it is the only end-to-end coverage of the retrieval path against a
+                   real Redis, and it is what caught this profile's first regression — the route
+                   versioning had moved the controller to /api/v1/retrieval while the test still
+                   called the root-level paths, invisible because nothing had ever executed it. -->
+              <excludedGroups>load,docker</excludedGroups>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <profile>
       <id>offline-embedding</id>
       <dependencies>

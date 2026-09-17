@@ -66,13 +66,43 @@ class LettuceClientFactoryTest {
     }
 
     @Test
-    void parsePortReturnsDefaultOnInvalidValue() {
-        assertEquals(6379, LettuceClientFactory.parsePort("notANumber"));
+    void parsePortReturnsTheCallersFallbackOnInvalidValue() {
+        assertEquals(6379, LettuceClientFactory.parsePort("notANumber", 6379));
+        assertEquals(26379, LettuceClientFactory.parsePort("notANumber", 26379));
+        assertEquals(26379, LettuceClientFactory.parsePort(null, 26379));
     }
 
     @Test
     void parsePortParsesValidPort() {
-        assertEquals(6380, LettuceClientFactory.parsePort("6380"));
+        assertEquals(6380, LettuceClientFactory.parsePort("6380", 6379));
+    }
+
+    /**
+     * A sentinel node written with a trailing colon and no digits used to fall back to 6379 — the
+     * Redis <em>data</em> port — so a typo in REDIS_SENTINEL_NODES silently pointed the client at
+     * the wrong service instead of a sentinel. The same method already used 26379 for a node
+     * written with no colon at all, so one method defaulted two ways for the same class of input.
+     */
+    @Test
+    void aSentinelNodeWithAnUnparseablePortFallsBackToTheSentinelPort() {
+        RedisURI uri = LettuceClientFactory.uriFromEnv(Map.of(
+                "REDIS_MODE", "sentinel",
+                "REDIS_SENTINEL_NODES", "sentinel-a:,sentinel-b:notANumber,sentinel-c"
+        ), Integer.MAX_VALUE);
+
+        assertEquals(3, uri.getSentinels().size());
+        assertEquals(26379, uri.getSentinels().get(0).getPort());
+        assertEquals(26379, uri.getSentinels().get(1).getPort());
+        assertEquals(26379, uri.getSentinels().get(2).getPort());
+    }
+
+    /** The standalone path keeps the data port as its fallback — REDIS_PORT is not a sentinel. */
+    @Test
+    void anUnparseableRedisPortStillFallsBackToTheDataPort() {
+        RedisURI uri = LettuceClientFactory.uriFromEnv(
+                Map.of("REDIS_PORT", "notANumber"), Integer.MAX_VALUE);
+
+        assertEquals(6379, uri.getPort());
     }
 
     @Test

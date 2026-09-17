@@ -98,16 +98,15 @@ public class RetrievalRedisConfig {
      * it, {@code RedisSentinelConfiguration} (via {@code RedisNode.fromString}) would throw on
      * the same input the raw-Lettuce path accepts.
      *
-     * <p>What this deliberately does <b>not</b> mirror is {@code LettuceClientFactory.parsePort}'s
-     * fallback to port 6379 on an unparseable port string. 6379 is the Redis <em>data</em> port;
-     * silently pointing a sentinel client at it instead of 26379 is a latent bug in the
-     * raw-Lettuce path (visible even within {@code sentinelUri} itself, which uses 26379 for the
-     * colon-less case but would fall through to 6379 for something like {@code "sentinel-a:"}),
-     * and new code should not copy it. Sentinel is a live deployment mode — see
-     * {@code k8s/eks-shared/network-policy-elasticache-patch.yaml} — so a malformed entry here
-     * fails loudly, with a message naming the property and the offending value, instead of
-     * either guessing wrong or throwing a generic "Unparseable port number" from deep inside
-     * Spring Data.
+     * <p>The two paths still differ on a <em>malformed</em> port, and deliberately so. Since
+     * {@code parsePort} takes its fallback from the caller, the raw-Lettuce path now guesses
+     * 26379 for an entry like {@code "sentinel-a:"} rather than the data port — no longer a
+     * misdirection, but still a guess. This path rejects such an entry outright instead, with a
+     * message naming the property and the offending value, because a typo in
+     * {@code recsys.redis.sentinel-nodes} is worth failing on rather than papering over. Sentinel
+     * is a live deployment mode — see {@code k8s/eks-shared/network-policy-elasticache-patch.yaml}
+     * — and rejecting here also avoids a generic "Unparseable port number" surfacing from deep
+     * inside Spring Data.
      */
     private static String withDefaultSentinelPort(String node) {
         if (isBracketedHostWithPort(node)) {

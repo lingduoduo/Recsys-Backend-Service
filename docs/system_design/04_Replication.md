@@ -128,6 +128,12 @@ Not everything is replicated, by design:
   three things only a live cluster can answer: the Sentinel pods start, they reach quorum,
   and a client discovers a *reachable* primary through the `redis-sentinel` Service. Run it
   after any change to the sentinel template.
+- **Failover, against a real cluster** — `scripts/k8s-sentinel-failover-test.sh` kills
+  `redis-primary` outright and asserts that a replica is promoted, that a
+  Sentinel-discovering client can **write** to the promotion (a replica answers `PING` and
+  refuses `SET`, so only a write proves it), and that the returning old primary rejoins as
+  a replica without the promotion flipping back. It also reports the Service trap in sharp
+  edge 7 rather than asserting it, since that is documented behaviour, not a regression.
 
 **Replica fallback is stable, not random.** When no same-AZ replica exists, `readable()`
 returns the *first configured* replica, deliberately: `readable()` and `probeReadable()`
@@ -166,13 +172,30 @@ connection rather than risking a silent replay.
    nothing noticed, because the EKS overlays scale the Sentinel StatefulSet to zero in
    favour of ElastiCache. `scripts/k8s-sentinel-smoke-test.sh` is the check that would
    have caught it.
-7. **Sentinel monitors the `redis-primary` Service, not a pod.** `sentinel monitor
-   mymaster redis-primary 6379` resolves to that Service's ClusterIP — measured in
-   minikube, Sentinel reported the master at a service-range address (`10.97.110.138`)
-   while the replicas it discovered were pod IPs (`10.244.0.3`, `10.244.0.5`). A ClusterIP
-   stays reachable for as long as the Service has any endpoint, so Sentinel's failure
-   detector is watching a load-balancer VIP rather than the process it is supposed to
-   supervise, and a promotion would not move the Service's `role: primary` selector
-   anyway. Quorum and discovery work — verified — but **automatic failover in-cluster
-   should not be assumed to work until it is exercised**, which the smoke test deliberately
-   does not claim to do.
+7. **Failover works; the `redis-primary` Service does not follow it.** Sentinel monitors
+   the primary as `redis-primary`, a *Service*, so it supervises a ClusterIP rather than a
+   pod. That turned out to matter less than expected and in a different way than expected
+   — `scripts/k8s-sentinel-failover-test.sh` killed the primary in minikube and measured
+   the whole cycle:
+
+   Failure detection and promotion are **fast and correct**. `+sdown` → `+odown`
+   (`#quorum 3/2`) → `+vote-for-leader` → `+switch-master` completed in **under a second**
+   of event time on a clean cluster; end to end, including the scale-down, ~10 s. A
+   Sentinel-discovering client is handed the promoted pod's IP and its writes succeed. When
+   the old primary returns it is demoted to a replica and the promotion holds. **Sentinel
+   failover needs no human intervention and no Service-selector edit.**
+
+   The trap is the Service. `redis-primary` and `redis` both select `role: primary`, a
+   static label on the StatefulSet's pod template that failover does not move. After
+   recovery they resolve to the *demoted replica*: `PING` returns `PONG`, reads return
+   correct data, and **every write fails with `-READONLY`, indefinitely**, while both
+   `redis-cli ping` probes stay green. Anything on `REDIS_HOST` rather than Sentinel
+   discovery is silently read-only until someone intervenes. This is why `k8s/base` sets
+   `REDIS_MODE=sentinel`; `REDIS_HOST: "redis"` is a correct address only while no failover
+   has occurred.
+
+   One operational artefact worth knowing: on `+switch-master` Sentinel adds the demoted
+   master to its replica list — and that "master" is a ClusterIP, so the stack accumulates
+   a permanently-dead slave entry. Measured: a cluster that had already failed over once
+   took *minutes* to elect on the next attempt, against under a second from clean. Sentinel
+   state is not free of history; a failover drill should start from a fresh namespace.

@@ -47,6 +47,11 @@ The fix is small and its scope should stay small: publish the five ports.
 - **Making `REDIS_MODE=sentinel` work for host-run services.** See "The Sentinel caveat" below:
   it needs changes to what Sentinel announces, not just a published port, and those changes
   make the topology less like the deployed one. Out of scope by decision, not oversight.
+  Measured, not assumed — see "Discovered during implementation".
+- **Changing what Sentinel announces.** `docker/redis/sentinel.conf` gains
+  `sentinel resolve-hostnames yes` (see "Discovered during implementation"), which is what
+  makes the Sentinels *start*. It does not change what they announce, and no `announce-ip` /
+  `announce-hostnames` is added.
 - **Changing any service's default configuration.** `scripts/run-microservices-local.sh` keeps
   pointing at standalone `localhost:6379`. Publishing a port adds a path in; it does not
   re-route anything.
@@ -137,3 +142,70 @@ for the eviction policy, and no test asserts port publication. A future edit cou
 `ports:` block and only the README would disagree. Judged not worth a conformance test: unlike
 the eviction policy — a silent correctness invariant — an unpublished port fails immediately
 and visibly the first time someone uses it.
+
+## Discovered during implementation
+
+Two things the design did not anticipate, both found by running the stack rather than reading
+it. Recorded here because the second one changes the scope of the change.
+
+### The Sentinel containers had never started
+
+Bringing the stack up showed all three Sentinels exiting 1 immediately:
+
+```
+# Failed to resolve hostname 'redis-primary'
+*** FATAL CONFIG FILE ERROR (Redis 7.4.11) ***
+Reading the configuration file, at line 1
+>>> 'sentinel monitor mymaster redis-primary 6379 2'
+Can't resolve instance hostname.
+```
+
+This is pre-existing and independent of port publishing — it reproduces on the unmodified
+file. It is *not* a DNS problem; resolution on the compose network is fine:
+
+```console
+$ docker run --rm --network recsys-backend-service_default redis:7-alpine \
+    sh -c 'getent hosts redis-primary; redis-cli -h redis-primary ping'
+172.20.0.3        redis-primary
+PONG
+```
+
+The cause is Redis Sentinel's own `resolve-hostnames`, which defaults to `no`. With that
+default a hostname in `sentinel monitor` is a fatal config error rather than a lookup, and
+Compose offers a DNS name with no stable IP to hardcode in its place. So
+`docker/redis/sentinel.conf` gains one line, `sentinel resolve-hostnames yes`, without which
+the three newly published Sentinel ports would have no listener behind them and this change
+would not deliver its goal.
+
+After the fix all three come up healthy and form a quorum — `num-other-sentinels 2` from each
+of 26379, 26380, and 26381.
+
+### The caveat is confirmed, from the real host
+
+The design predicted that Sentinel would hand back an unroutable bridge address. Measured from
+macOS, outside the Docker VM:
+
+```console
+$ redis-cli -p 26379 sentinel get-master-addr-by-name mymaster
+172.20.0.3
+6379
+$ redis-cli -t 4 -h 172.20.0.3 -p 6379 ping
+Could not connect to Redis at 172.20.0.3:6379: Operation timed out
+```
+
+Sentinel answers; the address it answers with does not. The caveat stands as written.
+
+### One check not exercised
+
+The literal `2181:2181` binding was not exercised: host 2181 was held by an unrelated local
+ZooKeeper throughout, and stopping someone else's container is not this change's business. The
+ZooKeeper container was instead verified on a throwaway `2182:2181` override, which confirms
+it serves 2181 and that a `ports:` mapping on it works:
+
+```console
+$ echo srvr | nc -w 4 127.0.0.1 2182 | head -1
+Zookeeper version: 3.8.4-9316c2a7a97e1666d8f4593f34dd6fc36ecc436c, built on 2024-02-12 22:16 UTC
+```
+
+What remains unverified is one integer. A wrong one fails loudly at container start, which is
+the same class of failure the "Risks" section already accepts for host-port collisions.

@@ -6,6 +6,11 @@ metadata:
   namespace: recsys
 data:
   sentinel-template.conf: |
+    # resolve-hostnames defaults to "no", which makes the hostname below a fatal config
+    # error ("Can't resolve instance hostname") rather than a lookup, so every sentinel
+    # exits 1 on startup. redis-primary is a Service DNS name with no stable IP to
+    # hardcode in its place. Same directive, same reason, as docker/redis/sentinel.conf.
+    sentinel resolve-hostnames yes
     sentinel monitor mymaster redis-primary 6379 2
     sentinel down-after-milliseconds mymaster 5000
     sentinel failover-timeout mymaster 30000

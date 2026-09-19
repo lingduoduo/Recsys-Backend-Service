@@ -121,9 +121,34 @@ Changing a backend port also requires updating its gateway upstream URL. See
 | Flink dashboard | 8081 | 8081 | No |
 | Splunk web UI | 8000 | 8000 | No — separate Splunk stack |
 | Splunk HEC | 8088 | 8088 | No — separate Splunk stack |
-| ZooKeeper | Not published | 2181 | No |
-| Redis replica | Not published | 6379 | No |
-| Redis Sentinels (three containers) | Not published | 26379 each | No |
+| ZooKeeper | 2181 | 2181 | No |
+| Redis replica | 6380 | 6379 | No |
+| Redis Sentinel 1 | 26379 | 26379 | No |
+| Redis Sentinel 2 | 26380 | 26379 | No |
+| Redis Sentinel 3 | 26381 | 26379 | No |
+
+Every container in the stack publishes a host port, so `redis-cli`, `nc`, and
+any host-run process reach it directly. The replica takes 6380 because 6379 is
+the primary's, and Sentinel 1 takes 26379 because that is what
+`REDIS_SENTINEL_NODES` defaults to. These are exclusive host bindings: another
+local stack already publishing 2181, 6379, or 9092 must be stopped first.
+
+Publishing 26379 makes Sentinel reachable, not usable for discovery.
+`redis-cli -p 26379 sentinel masters` works from the host, but
+`docker/redis/sentinel.conf` monitors the primary as `redis-primary`, so the
+address Sentinel hands back is that container's Docker-bridge IP:
+
+```console
+$ redis-cli -p 26379 sentinel get-master-addr-by-name mymaster
+172.20.0.3
+6379
+$ redis-cli -h 172.20.0.3 -p 6379 ping
+Could not connect to Redis at 172.20.0.3:6379: Operation timed out
+```
+
+`REDIS_MODE=sentinel` therefore still fails from a host-run service, at the
+second hop, after Sentinel answers. Local runs stay on `REDIS_MODE=standalone`
+against `localhost:6379`.
 
 Kafka, Flink, and the Redis replication topology belong to the optional
 streaming stack. To start it:

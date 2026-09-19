@@ -1,6 +1,8 @@
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
+    ports:
+      - "2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -56,6 +58,9 @@ services:
   redis-replica:
     image: redis:7-alpine
     container_name: redis-replica
+    # 6379 on the host is the primary's; the replica takes the conventional second Redis port.
+    ports:
+      - "6380:6379"
     # See the primary above: eviction is confined to TTL-bearing keys.
     command: >
       redis-server
@@ -74,6 +79,9 @@ services:
   redis-sentinel-1:
     image: redis:7-alpine
     container_name: redis-sentinel-1
+    # 26379 is the REDIS_SENTINEL_NODES default, so sentinel 1 holds it.
+    ports:
+      - "26379:26379"
     volumes:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel-template.conf:ro
       - redis-sentinel-1-data:/data
@@ -91,6 +99,8 @@ services:
   redis-sentinel-2:
     image: redis:7-alpine
     container_name: redis-sentinel-2
+    ports:
+      - "26380:26379"
     volumes:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel-template.conf:ro
       - redis-sentinel-2-data:/data
@@ -108,6 +118,8 @@ services:
   redis-sentinel-3:
     image: redis:7-alpine
     container_name: redis-sentinel-3
+    ports:
+      - "26381:26379"
     volumes:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel-template.conf:ro
       - redis-sentinel-3-data:/data

@@ -209,3 +209,18 @@ Zookeeper version: 3.8.4-9316c2a7a97e1666d8f4593f34dd6fc36ecc436c, built on 2024
 
 What remains unverified is one integer. A wrong one fails loudly at container start, which is
 the same class of failure the "Risks" section already accepts for host-port collisions.
+
+### The same defect exists in `k8s/base`
+
+`k8s/base/redis-cluster.yaml`'s `redis-sentinel-config` ConfigMap carried the identical
+template — `sentinel monitor mymaster redis-primary 6379 2`, no `resolve-hostnames`, same
+`redis:7-alpine` image — so its Sentinel StatefulSet cannot start either, while
+`k8s/base/configmap.yaml` points all four services at those Sentinels with
+`REDIS_MODE=sentinel`. The EKS overlays scale that StatefulSet to zero and set
+`REDIS_SENTINEL_MASTER: ""` in favour of ElastiCache, so the defect is latent in the deployed
+regions; a plain `k8s/base` apply is not.
+
+The same one line is added there. **This manifest change is unverified against a live
+cluster** — none was available. What is verified is the mechanism: the failure mode and the
+fix were both reproduced with the same image and the same directive in Docker. The manifest
+edit is a transcription of a proven fix, not a proven manifest.

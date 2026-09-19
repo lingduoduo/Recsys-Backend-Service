@@ -122,6 +122,12 @@ Not everything is replicated, by design:
 - **Client build** — `LettuceClientFactoryTest` (pool construction, Sentinel URI).
 - **Pipeline connection lifecycle** — `LettuceRedisExecutorPipelineTest` (a failed batch
   destroys its connection rather than returning it to the pool).
+- **Sentinel tier, against a real cluster** — `scripts/k8s-sentinel-smoke-test.sh`. Every
+  test above is a unit test; none of them starts a Sentinel. The script applies
+  `k8s/base/redis-cluster.yaml` to a throwaway cluster (minikube/kind/k3d) and asserts the
+  three things only a live cluster can answer: the Sentinel pods start, they reach quorum,
+  and a client discovers a *reachable* primary through the `redis-sentinel` Service. Run it
+  after any change to the sentinel template.
 
 **Replica fallback is stable, not random.** When no same-AZ replica exists, `readable()`
 returns the *first configured* replica, deliberately: `readable()` and `probeReadable()`
@@ -152,3 +158,21 @@ connection rather than risking a silent replay.
 5. **No replicas configured = primary-only.** Unset `REDIS_REPLICA_NODES` is a valid
    (single-node) deployment, but then reads and writes share the primary and there is no
    read scaling or AZ-locality.
+6. **The sentinel template must set `resolve-hostnames yes`.** It monitors the primary by
+   hostname, and Redis Sentinel defaults `resolve-hostnames` to `no` — which makes a
+   hostname a *fatal config file error*, not a lookup. Without the directive every Sentinel
+   pod CrashLoopBackOffs at startup; this was the state of both
+   `k8s/base/redis-cluster.yaml` and `docker/redis/sentinel.conf` until 2026-09-19, and
+   nothing noticed, because the EKS overlays scale the Sentinel StatefulSet to zero in
+   favour of ElastiCache. `scripts/k8s-sentinel-smoke-test.sh` is the check that would
+   have caught it.
+7. **Sentinel monitors the `redis-primary` Service, not a pod.** `sentinel monitor
+   mymaster redis-primary 6379` resolves to that Service's ClusterIP — measured in
+   minikube, Sentinel reported the master at a service-range address (`10.97.110.138`)
+   while the replicas it discovered were pod IPs (`10.244.0.3`, `10.244.0.5`). A ClusterIP
+   stays reachable for as long as the Service has any endpoint, so Sentinel's failure
+   detector is watching a load-balancer VIP rather than the process it is supposed to
+   supervise, and a promotion would not move the Service's `role: primary` selector
+   anyway. Quorum and discovery work — verified — but **automatic failover in-cluster
+   should not be assumed to work until it is exercised**, which the smoke test deliberately
+   does not claim to do.

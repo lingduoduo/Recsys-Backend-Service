@@ -95,7 +95,7 @@ public class ModelRuntimeProvider implements SmartInitializingSingleton {
                                 String itemEmbeddingsSource,
                                 String redisItemEmbeddingPrefix) {
         this(artifactLocator, abTestConfig, modelFile, itemEmbeddingsSource, redisItemEmbeddingPrefix,
-                new ModelServingProperties(), new SimpleMeterRegistry());
+                ModelServingProperties.fromEnvironment(), new SimpleMeterRegistry());
     }
 
     @Autowired
@@ -111,7 +111,8 @@ public class ModelRuntimeProvider implements SmartInitializingSingleton {
         this.modelFile = Strings.orDefault(modelFile, "dssm_model.onnx");
         this.itemEmbeddingsSource = itemEmbeddingsSource == null ? "classpath" : itemEmbeddingsSource.trim();
         this.redisItemEmbeddingPrefix = Strings.orDefault(redisItemEmbeddingPrefix, "i2vEmb");
-        this.servingProperties = servingProperties == null ? new ModelServingProperties() : servingProperties;
+        this.servingProperties =
+                servingProperties == null ? ModelServingProperties.fromEnvironment() : servingProperties;
         this.meterRegistry = meterRegistry == null ? new SimpleMeterRegistry() : meterRegistry;
     }
 

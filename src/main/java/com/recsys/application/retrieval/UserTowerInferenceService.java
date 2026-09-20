@@ -85,7 +85,7 @@ public class UserTowerInferenceService {
                 Strings.orDefault(modelFile, DEFAULT_MODEL_FILE),
                 null,
                 ModelContract.legacy(),
-                new ModelServingProperties.Onnx(),
+                ModelServingProperties.Onnx.fromEnvironment(),
                 new SimpleMeterRegistry(),
                 OrtSessionHandle::open,
                 SmokeInputs.DEFAULT);

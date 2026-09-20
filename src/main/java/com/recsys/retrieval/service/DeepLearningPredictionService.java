@@ -75,7 +75,7 @@ public class DeepLearningPredictionService {
                                   SessionOpener sessionOpener) {
         try {
             this.environment = OrtEnvironment.getEnvironment();
-            this.onnx = onnx;
+            this.onnx = java.util.Objects.requireNonNull(onnx, "onnx");
             this.sessionOpener =
                 sessionOpener == null ? DeepLearningPredictionService::openOrtSession : sessionOpener;
             this.session = this.sessionOpener.open(loadModelBytes(), onnx);

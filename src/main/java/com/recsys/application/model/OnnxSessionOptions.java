@@ -16,6 +16,12 @@ import com.recsys.config.ModelServingProperties;
  * none. Those pools are native, so no JVM thread metric could report the difference and
  * nothing noticed.
  *
+ * <p>One caveat for a reader trusting a green build: the {@link #toOrt} mapping below is
+ * verifiable by nothing. {@code SessionOptions} has no getters, and SEQUENTIAL and PARALLEL
+ * produce identical inference output, so swapping the two arms would pass every test in this
+ * repository. Consolidating the mapping here does not make it covered — it only makes the one
+ * uncovered copy easier to find.
+ *
  * <p>Takes the {@code SessionOptions} rather than returning one on purpose. It holds native
  * memory and must be closed by whoever opened it; handing a fresh one back across a package
  * boundary is how that ownership gets lost.

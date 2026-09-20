@@ -252,16 +252,38 @@ was not what the manifest said.
 The values are read two ways, and both must agree:
 
 - Spring binds them via `application.yml`'s `${...}` placeholders into `ModelServingProperties`.
-- `ModelServingProperties.fromEnvironment()` reads them directly, for the constructors Spring
-  did not build — `UserTowerInferenceService`'s locator constructor, `ModelRuntimeProvider`'s
-  non-Spring constructor, and `DeepLearningPredictionService(ObjectMapper)`.
+- `ModelServingProperties.fromEnvironment()` reads them directly, for the four construction
+  sites Spring did not build: `UserTowerInferenceService`'s locator constructor,
+  `ModelRuntimeProvider`'s non-Spring constructor, `ModelRuntimeProvider`'s `@Autowired` null
+  guard, and `DeepLearningPredictionService(ObjectMapper)`.
 
-Both reject the same input. A non-numeric, zero or negative thread count, or an unrecognised
-execution mode, **fails startup** rather than falling back to the default: the env path uses
-`EnvVars` (which throws) and not `EnvConfig` (which swallows), so a variable cannot mean one
-thing to Spring and another to a direct constructor. `recsys.model.recall.*` is deliberately
-**not** environment-sourced on the direct path — the same gap still exists there, and is
-recorded in the design doc's non-goals rather than fixed.
+  Today only the last of those is reachable in production: `grep` finds no
+  `new ModelRuntimeProvider(` anywhere in `src/main`, and the one `new UserTowerInferenceService(`
+  there already passes the Spring-bound config. The other three are test entry points and the
+  seam a future non-Spring caller would use. They were fixed anyway, because a source-level
+  disagreement about what a variable means does not become real only once someone trips on it.
+
+The two paths are held to the same verdict on every input, which is the property this factory
+exists for. A non-numeric, zero or negative thread count, an unrecognised execution mode, **or
+a thread count that is set but blank**, all **fail startup** rather than falling back: the env
+path uses `EnvVars` (which throws) and not `EnvConfig` (which swallows).
+
+The blank case looks asymmetric and is not a mistake:
+
+| Input | Spring | `fromEnvironment` |
+|---|---|---|
+| thread count set but blank (`value: ""`) | fails | fails |
+| execution mode set but blank | falls back to `SEQUENTIAL` | falls back to `SEQUENTIAL` |
+
+Spring's `${RECSYS_MODEL_ONNX_INTRA_OP_THREADS:1}` supplies its default only when the variable
+is **unset**, so an empty value reaches a primitive `int` and fails context startup with "A null
+value cannot be assigned to a primitive type"; Spring binds the enum as a nullable object and
+falls back there instead. `fromEnvironment` reproduces both verdicts. Every env-path failure
+names the variable in its message, because on that path there is no Spring `BindException` to
+supply that context and the failure mode is a crash-looping pod.
+
+`recsys.model.recall.*` is deliberately **not** environment-sourced on the direct path: the same
+gap still exists there, and is recorded in the design doc's non-goals rather than fixed.
 
 ### Sizing
 

@@ -61,10 +61,18 @@ object directly instead:
 - `ModelRuntimeProvider:98` — `new ModelServingProperties()`
 
 Both yield the **hard-coded** field initializers (1 / 1 / SEQUENTIAL), never the environment.
-A deployment setting `RECSYS_MODEL_ONNX_INTRA_OP_THREADS=4` gets 4 through the Spring-bound
-path and 1 through these. The two disagree silently, and the defaults being equal today is
-what hides it: the bug is invisible until someone overrides the value, which is precisely
-when they are trying to tune.
+Set `RECSYS_MODEL_ONNX_INTRA_OP_THREADS=4` and the Spring-bound path gives 4 while these give
+1. The defaults being equal today is what hides it: the disagreement is invisible until
+someone overrides the value, which is precisely when they are trying to tune.
+
+**Scope of the claim, measured.** These two are not reachable from production today. `grep`
+over `src/main` finds no `new ModelRuntimeProvider(` at all, and the single
+`new UserTowerInferenceService(` there (`ModelRuntimeProvider:315`) uses the verified-bytes
+constructor, which already passes `servingProperties.getOnnx()`. Spring builds the provider,
+and Spring does not pass null for a required constructor dependency, so the null guard is
+unreachable too. So this is a source-level defect at test-only entry points and the seam a
+future non-Spring caller would use — not a live production disagreement. It is worth fixing
+on those terms and should not be described on any stronger ones.
 
 ### A third, smaller thing
 
@@ -190,6 +198,15 @@ variables to anything but `1` today (`k8s/base/model-serving.yaml`, pinned by
 **The env-var read happens at construction, not refresh.** `fromEnvironment` is a snapshot;
 changing the variable requires a restart. That already describes every other env var here.
 
+**A blank thread count now fails startup on both paths.** Measured against an
+`ApplicationContextRunner`: Spring already rejects `recsys.model.onnx.intra-op-threads=`
+(the `${...:1}` default applies only when the variable is *unset*, so an empty value reaches a
+primitive `int`), while it accepts a blank execution mode and falls back. `fromEnvironment`
+reproduces both verdicts rather than the tidier-looking rule of "blank means unset", because
+agreeing with Spring is the invariant and a tidier rule would break it. A `value: ""` in a
+ConfigMap therefore crash-loops the pod — as it already did on the Spring path before this
+change.
+
 ## Discovered during implementation
 
 **The `<!-- ... -- ... -->` in the pom comment made the POM unparseable.** An em-dash rendered
@@ -218,3 +235,45 @@ Task 4 rather than left, since it is the identical expression one line away.
 `intraOp - 1`), but the derivation is evidently not one-thread-per-core. No claim about the
 exact formula is made anywhere in the change; what is stated is the measurement and that it
 varies with the host.
+
+## Discovered during code review
+
+**The first version of the test could not catch the bug it was written for.** `RecordingOpener`
+replaces the session opener wholesale, so the four tests using it never execute
+`openOrtSession` — the only place `OnnxSessionOptions.apply` is called for this session.
+Deleting that single line, which is precisely the defect this change exists to remove, left
+**19 tests green**, verified by mutating the file and running them. Both the manifest comment
+and the pom comment asserted in prose that these tests "pin that the value is read"; that was
+false for the one session the whole change is about.
+
+The lesson is sharper than "write a better test". The test *was* watched failing — it failed
+to **compile**, because the seam it needed did not exist yet. A compile failure feels like a
+red test and is not one: it proves the API is missing, never that the assertion discriminates.
+The rule this repo already had (`feedback-conformance-test-blind-spots`) says to watch the
+test fail against the *bug*; a type error is not the bug.
+
+Fixed by `theRealOpenerAppliesEveryThreadSettingToTheSession`, which passes a null opener so
+the real one runs and spies on the `Onnx` getters. Red with the line deleted, green with it
+restored — watched, in that order.
+
+**Two of the three prose claims about path agreement were false.** Probing nine inputs through
+an `ApplicationContextRunner` and through `fromEnvironment` side by side found eight agreeing
+and one not: a **blank thread count**, which Spring rejects and the env path silently
+defaulted. Worse, a test named `blankEnvironmentValuesFallBackRatherThanFailing` pinned the
+divergent behaviour as intended, three lines above a comment asserting the opposite invariant.
+Resolved in favour of agreement: `readThreadCount` now rejects blank, and the asymmetry with
+execution mode (which Spring *does* default) is documented as Spring's rather than smoothed
+over.
+
+**The justification written into `SpringlessOnnxConfigTest` was false.** It claimed
+construction "loads ONNX artifacts and opens Redis pools"; both constructors are field
+assignment, with the ONNX load in `init()` and the recall infra built lazily. The test is
+still source-level — no accessor exposes the resolved config, and adding one to production
+code purely for a test costs more than it buys — but it now says so, and says what it cannot
+catch.
+
+**`--` inside an XML comment broke the POM a second time**, in the very commit that recorded
+it breaking the POM the first time. The verification also lied a second time, differently:
+`mvn -q validate 2>&1 | head -3 && echo "POM OK"` printed `POM OK` because `&&` chains off
+`head`, not off Maven. A guard now exists in the form of the habit, not the tooling: parse the
+POM and read Maven's own `BUILD SUCCESS`, never a shell echo downstream of a pipe.

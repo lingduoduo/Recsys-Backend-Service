@@ -54,14 +54,32 @@ class ModelServingPropertiesTest {
         assertThat(fromEnv.getExecutionMode()).isEqualTo(hardCoded.getExecutionMode());
     }
 
+    // Measured against an ApplicationContextRunner bound to recsys.model.onnx.*: Spring FAILS on a
+    // blank thread count ("A null value cannot be assigned to a primitive type") because the
+    // ${...:1} default applies only when the variable is UNSET, and ACCEPTS a blank execution mode
+    // because it binds the enum as a nullable object. The env path has to reproduce both verdicts,
+    // asymmetric as they look, or the same value means two different things depending on the reader.
     @Test
-    void blankEnvironmentValuesFallBackRatherThanFailing() {
-        ModelServingProperties.Onnx onnx = ModelServingProperties.Onnx.fromEnvironment(Map.of(
-                "RECSYS_MODEL_ONNX_INTRA_OP_THREADS", "  ",
-                "RECSYS_MODEL_ONNX_EXECUTION_MODE", "")::get);
+    void aBlankThreadCountIsRejectedBecauseSpringRejectsIt() {
+        assertThatThrownBy(() -> ModelServingProperties.Onnx.fromEnvironment(
+                Map.of("RECSYS_MODEL_ONNX_INTRA_OP_THREADS", "  ")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_ONNX_INTRA_OP_THREADS")
+                .hasMessageContaining("blank");
 
-        assertThat(onnx.getIntraOpThreads()).isEqualTo(1);
+        assertThatThrownBy(() -> ModelServingProperties.Onnx.fromEnvironment(
+                Map.of("RECSYS_MODEL_ONNX_INTER_OP_THREADS", "")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_ONNX_INTER_OP_THREADS");
+    }
+
+    @Test
+    void aBlankExecutionModeFallsBackBecauseSpringAcceptsIt() {
+        ModelServingProperties.Onnx onnx = ModelServingProperties.Onnx.fromEnvironment(
+                Map.of("RECSYS_MODEL_ONNX_EXECUTION_MODE", "  ")::get);
+
         assertThat(onnx.getExecutionMode()).isEqualTo(SEQUENTIAL);
+        assertThat(onnx.getIntraOpThreads()).isEqualTo(1);
     }
 
     @Test
@@ -83,13 +101,19 @@ class ModelServingPropertiesTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("RECSYS_MODEL_ONNX_INTRA_OP_THREADS");
 
+        // Every env failure names the variable. The setter's own message ("intraOpThreads must be
+        // at least 1") does not, and on this path there is no BindException to supply it -- the
+        // stated cost of failing fast is a crash-looping pod, whose log line must say which
+        // variable caused it.
         assertThatThrownBy(() -> ModelServingProperties.Onnx.fromEnvironment(
                 Map.of("RECSYS_MODEL_ONNX_INTRA_OP_THREADS", "0")::get))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_ONNX_INTRA_OP_THREADS");
 
         assertThatThrownBy(() -> ModelServingProperties.Onnx.fromEnvironment(
                 Map.of("RECSYS_MODEL_ONNX_INTER_OP_THREADS", "-1")::get))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_ONNX_INTER_OP_THREADS");
 
         assertThatThrownBy(() -> ModelServingProperties.Onnx.fromEnvironment(
                 Map.of("RECSYS_MODEL_ONNX_EXECUTION_MODE", "TURBO")::get))

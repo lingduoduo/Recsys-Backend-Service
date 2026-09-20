@@ -700,14 +700,24 @@
                 <include>**/retrieval/multichannel/RecallTaskMetricsTest.java</include>
                 <include>**/k8s/ModelServingManifestTest.java</include>
                 <!-- ModelServingManifestTest one line up pins that the manifest SETS
-                     RECSYS_MODEL_ONNX_INTRA_OP_THREADS=1; these two pin that the value is
-                     actually READ, which is a different claim and was false for one of the
-                     JVM's two OrtSessions. An unconfigured session takes ONNX Runtime's
-                     CPU-derived default (measured at an intra-op pool of 4 on an 8-core host)
-                     against a pod whose CPU limit is 2, which is the oversubscription the
-                     manifest comment exists to prevent. Those pools are native, so no JVM
-                     thread metric can report the regression; a test is the only detector.
-                     Pure unit-level: no ONNX Runtime, no Redis, no Docker, no clock. -->
+                     RECSYS_MODEL_ONNX_INTRA_OP_THREADS=1. These two pin the next link in that
+                     chain: that the variable PARSES to the value Spring would have bound, and
+                     that neither Spring-less constructor has reverted to hard-coded defaults.
+                     The last link, that a session actually applies it, is
+                     DeepLearningPredictionOnnxConfigTest, gated by -Pretrieval rather than
+                     here, because it loads real ONNX Runtime. All three links are on a PR gate
+                     (retrieval-pr.yml runs on every pull_request, no path filter); they are
+                     just split across two.
+
+                     Why the chain is worth gating at all: an unconfigured session takes ONNX
+                     Runtime's CPU-derived default (measured at an intra-op pool of 4 on an
+                     8-core host) against a pod whose CPU limit is 2, the oversubscription
+                     the manifest comment exists to prevent, and those pools are NATIVE, so
+                     no JVM thread metric can report the regression. A test is the only
+                     detector there will ever be.
+
+                     Both entries below are pure unit-level: no ONNX Runtime, no Redis, no
+                     Docker, no clock. -->
                 <include>**/config/ModelServingPropertiesTest.java</include>
                 <include>**/model/SpringlessOnnxConfigTest.java</include>
                 <!-- Without this on the gate, a dropped exclude= entry or a renamed/removed

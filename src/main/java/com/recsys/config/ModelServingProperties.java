@@ -7,6 +7,8 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.util.Locale;
+
 /**
  * Runtime tuning for ONNX inference and parallel recommendation recall.
  */
@@ -28,12 +30,31 @@ public class ModelServingProperties {
         return recall;
     }
 
+    /**
+     * A properties object for the code paths Spring did not build. Only the ONNX block is
+     * environment-sourced; {@code recsys.model.recall.*} keeps its hard-coded defaults here,
+     * deliberately -- see docs/superpowers/specs/2026-09-20-onnx-thread-config-unification-design.md.
+     */
+    public static ModelServingProperties fromEnvironment() {
+        return fromEnvironment(System::getenv);
+    }
+
+    public static ModelServingProperties fromEnvironment(EnvVars.EnvReader env) {
+        ModelServingProperties properties = new ModelServingProperties();
+        properties.onnx.applyEnvironment(env);
+        return properties;
+    }
+
     public enum ExecutionMode {
         SEQUENTIAL,
         PARALLEL
     }
 
     public static class Onnx {
+
+        public static final String INTRA_OP_THREADS_ENV = "RECSYS_MODEL_ONNX_INTRA_OP_THREADS";
+        public static final String INTER_OP_THREADS_ENV = "RECSYS_MODEL_ONNX_INTER_OP_THREADS";
+        public static final String EXECUTION_MODE_ENV = "RECSYS_MODEL_ONNX_EXECUTION_MODE";
 
         @Positive
         private int intraOpThreads = 1;
@@ -69,6 +90,49 @@ public class ModelServingProperties {
                 throw new IllegalArgumentException("executionMode must not be null");
             }
             this.executionMode = executionMode;
+        }
+
+        /**
+         * The same three settings {@code application.yml} exposes as {@code ${RECSYS_MODEL_ONNX_*}},
+         * read directly. Spring is not the only thing that builds this class: the constructors at
+         * {@code UserTowerInferenceService} and {@code ModelRuntimeProvider} that take no properties
+         * object would otherwise serve the hard-coded field initializers and silently disagree with
+         * a deployment that overrode the variables.
+         *
+         * <p>Parsing goes through {@link EnvVars}, which throws on an unparseable value, rather than
+         * {@link EnvConfig}, which returns the default. Both paths must reject the same input: the
+         * Spring path already fails context startup on a non-numeric or non-positive value, and a
+         * variable that means one thing when Spring reads it and another when this does is the
+         * defect, not the fix.
+         */
+        public static Onnx fromEnvironment() {
+            return fromEnvironment(System::getenv);
+        }
+
+        public static Onnx fromEnvironment(EnvVars.EnvReader env) {
+            Onnx onnx = new Onnx();
+            onnx.applyEnvironment(env);
+            return onnx;
+        }
+
+        /** Routes through the setters so {@code @Positive} validation covers env-sourced values too. */
+        private void applyEnvironment(EnvVars.EnvReader env) {
+            setIntraOpThreads(EnvVars.readInt(env, INTRA_OP_THREADS_ENV, intraOpThreads));
+            setInterOpThreads(EnvVars.readInt(env, INTER_OP_THREADS_ENV, interOpThreads));
+            setExecutionMode(readExecutionMode(env, executionMode));
+        }
+
+        private static ExecutionMode readExecutionMode(EnvVars.EnvReader env, ExecutionMode defaultMode) {
+            String raw = env.get(EXECUTION_MODE_ENV);
+            if (raw == null || raw.isBlank()) {
+                return defaultMode;
+            }
+            try {
+                return ExecutionMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException("env var " + EXECUTION_MODE_ENV
+                        + " is not a valid execution mode: " + raw);
+            }
         }
     }
 

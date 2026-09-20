@@ -8,7 +8,10 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.recsys.application.model.OnnxSessionOptions;
+import com.recsys.config.ModelServingProperties;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -37,23 +40,64 @@ public class DeepLearningPredictionService {
     private static final String USER_INPUT = "user_ids";
     private static final String ITEM_INPUT = "item_ids";
 
+    /**
+     * How the ONNX session gets opened. A seam, not an extension point: SessionOptions has no
+     * getters, so this is the only way a test can observe that the session was configured at all.
+     */
+    @FunctionalInterface
+    interface SessionOpener {
+        OrtSession open(byte[] modelBytes, ModelServingProperties.Onnx onnx) throws OrtException;
+    }
+
     private final OrtEnvironment environment;
     private volatile OrtSession session;
     private final Map<String, Long> userLookup;
     private final Map<String, Long> itemLookup;
+    private final ModelServingProperties.Onnx onnx;
+    private final SessionOpener sessionOpener;
 
+    @Autowired
+    public DeepLearningPredictionService(ObjectMapper objectMapper, ModelServingProperties properties) {
+        this(objectMapper, properties.getOnnx(), null);
+    }
+
+    /**
+     * Env-fallback constructor for callers Spring did not build. Reads the same
+     * {@code RECSYS_MODEL_ONNX_*} variables the properties object is bound from, so this session
+     * is configured identically however it was constructed.
+     */
     public DeepLearningPredictionService(ObjectMapper objectMapper) {
+        this(objectMapper, ModelServingProperties.Onnx.fromEnvironment(), null);
+    }
+
+    DeepLearningPredictionService(ObjectMapper objectMapper,
+                                  ModelServingProperties.Onnx onnx,
+                                  SessionOpener sessionOpener) {
         try {
             this.environment = OrtEnvironment.getEnvironment();
-            try (OrtSession.SessionOptions opts = new OrtSession.SessionOptions()) {
-                opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
-                this.session = environment.createSession(loadModelBytes(), opts);
-            }
+            this.onnx = onnx;
+            this.sessionOpener =
+                sessionOpener == null ? DeepLearningPredictionService::openOrtSession : sessionOpener;
+            this.session = this.sessionOpener.open(loadModelBytes(), onnx);
             LookupTables lookups = readLookups(objectMapper);
             this.userLookup = lookups.userLookup();
             this.itemLookup = lookups.itemLookup();
         } catch (IOException | OrtException e) {
             throw new IllegalStateException("Failed to load deep learning prediction artifacts", e);
+        }
+    }
+
+    /**
+     * The real opener. ALL_OPT is this session's own graph-optimization choice and stays here;
+     * the thread settings come from the shared helper so this session cannot drift from the
+     * two-tower ones again.
+     */
+    private static OrtSession openOrtSession(byte[] modelBytes, ModelServingProperties.Onnx onnx)
+            throws OrtException {
+        try (OrtSession.SessionOptions opts = new OrtSession.SessionOptions()) {
+            OnnxSessionOptions.apply(opts, onnx);
+            opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
+            return OrtEnvironment.getEnvironment().createSession(modelBytes, opts);
         }
     }
 
@@ -99,14 +143,11 @@ public class DeepLearningPredictionService {
     }
 
     public synchronized void reload() throws IOException, OrtException {
-        try (OrtSession.SessionOptions opts = new OrtSession.SessionOptions()) {
-            opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
-            OrtSession newSession = environment.createSession(loadModelBytes(), opts);
-            OrtSession old = this.session;
-            this.session = newSession;
-            if (old != null) {
-                old.close();
-            }
+        OrtSession newSession = sessionOpener.open(loadModelBytes(), onnx);
+        OrtSession old = this.session;
+        this.session = newSession;
+        if (old != null) {
+            old.close();
         }
     }
 

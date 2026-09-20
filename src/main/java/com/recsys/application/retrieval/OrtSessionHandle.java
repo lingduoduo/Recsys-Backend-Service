@@ -6,6 +6,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import com.recsys.application.model.OnnxSessionOptions;
 import com.recsys.config.ModelServingProperties;
 
 import java.nio.LongBuffer;
@@ -30,18 +31,9 @@ final class OrtSessionHandle implements OnnxSessionHandle {
         // SessionOptions holds native memory of its own; it is safe to close once the session
         // has been created, and it must be closed even when createSession throws.
         try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
-            options.setIntraOpNumThreads(onnx.getIntraOpThreads());
-            options.setInterOpNumThreads(onnx.getInterOpThreads());
-            options.setExecutionMode(toOrt(onnx.getExecutionMode()));
+            OnnxSessionOptions.apply(options, onnx);
             return new OrtSessionHandle(environment, environment.createSession(modelBytes, options));
         }
-    }
-
-    private static OrtSession.SessionOptions.ExecutionMode toOrt(ModelServingProperties.ExecutionMode mode) {
-        return switch (mode) {
-            case SEQUENTIAL -> OrtSession.SessionOptions.ExecutionMode.SEQUENTIAL;
-            case PARALLEL -> OrtSession.SessionOptions.ExecutionMode.PARALLEL;
-        };
     }
 
     @Override

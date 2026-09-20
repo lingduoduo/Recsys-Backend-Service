@@ -122,12 +122,86 @@ class ModelServingPropertiesTest {
     }
 
     @Test
-    void wholePropertiesFactoryCarriesTheOnnxEnvironment() {
-        ModelServingProperties properties = ModelServingProperties.fromEnvironment(
-                Map.of("RECSYS_MODEL_ONNX_INTRA_OP_THREADS", "6")::get);
+    void wholePropertiesFactoryCarriesBothBlocksFromTheEnvironment() {
+        ModelServingProperties properties = ModelServingProperties.fromEnvironment(Map.of(
+                "RECSYS_MODEL_ONNX_INTRA_OP_THREADS", "6",
+                "RECSYS_MODEL_RECALL_QUEUE_CAPACITY", "512")::get);
 
         assertThat(properties.getOnnx().getIntraOpThreads()).isEqualTo(6);
-        // Recall is deliberately NOT environment-sourced here -- see the spec's non-goals.
-        assertThat(properties.getRecall().getQueueCapacity()).isEqualTo(256);
+        assertThat(properties.getRecall().getQueueCapacity()).isEqualTo(512);
+    }
+
+    @Test
+    void readsRecallSettingsFromTheEnvironment() {
+        ModelServingProperties.Recall recall = ModelServingProperties.Recall.fromEnvironment(Map.of(
+                "RECSYS_MODEL_RECALL_CORE_THREADS", "5",
+                "RECSYS_MODEL_RECALL_QUEUE_CAPACITY", "512",
+                "RECSYS_MODEL_RECALL_TIMEOUT_MS", "350")::get);
+
+        assertThat(recall.getCoreThreads()).isEqualTo(5);
+        assertThat(recall.getQueueCapacity()).isEqualTo(512);
+        assertThat(recall.getTimeoutMs()).isEqualTo(350);
+    }
+
+    @Test
+    void recallEnvironmentFallbackMatchesTheHardCodedDefaults() {
+        ModelServingProperties.Recall fromEnv = ModelServingProperties.Recall.fromEnvironment(name -> null);
+        ModelServingProperties.Recall hardCoded = new ModelServingProperties.Recall();
+
+        assertThat(fromEnv.getCoreThreads()).isEqualTo(hardCoded.getCoreThreads());
+        assertThat(fromEnv.getQueueCapacity()).isEqualTo(hardCoded.getQueueCapacity());
+        assertThat(fromEnv.getTimeoutMs()).isEqualTo(hardCoded.getTimeoutMs());
+    }
+
+    // Measured against an ApplicationContextRunner: Spring accepts core-threads=0 and resolves it
+    // to 2 x availableProcessors (the documented "use the default" input), but REJECTS
+    // queue-capacity=0 and timeout-ms=0. So the floor differs per property and cannot be the
+    // single "at least 1" rule the ONNX block uses.
+    @Test
+    void zeroCoreThreadsMeansTwicetheProcessorCountJustAsItDoesUnderSpring() {
+        ModelServingProperties.Recall recall = ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_CORE_THREADS", "0")::get);
+
+        assertThat(recall.getCoreThreads())
+                .isEqualTo(Math.max(1, Runtime.getRuntime().availableProcessors() * 2));
+    }
+
+    @Test
+    void invalidRecallEnvironmentValuesFailFastAndNameTheVariable() {
+        assertThatThrownBy(() -> ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_CORE_THREADS", "-1")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_RECALL_CORE_THREADS");
+
+        assertThatThrownBy(() -> ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_QUEUE_CAPACITY", "0")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_RECALL_QUEUE_CAPACITY");
+
+        assertThatThrownBy(() -> ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_TIMEOUT_MS", "0")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_RECALL_TIMEOUT_MS");
+
+        assertThatThrownBy(() -> ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_TIMEOUT_MS", "abc")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_RECALL_TIMEOUT_MS");
+    }
+
+    // Spring fails on a blank value for all three -- they are primitive-typed, and the ${...:N}
+    // default applies only when the variable is UNSET. Same verdict required here.
+    @Test
+    void blankRecallValuesAreRejectedBecauseSpringRejectsThem() {
+        assertThatThrownBy(() -> ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_CORE_THREADS", "  ")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_RECALL_CORE_THREADS")
+                .hasMessageContaining("blank");
+
+        assertThatThrownBy(() -> ModelServingProperties.Recall.fromEnvironment(
+                Map.of("RECSYS_MODEL_RECALL_TIMEOUT_MS", "")::get))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RECSYS_MODEL_RECALL_TIMEOUT_MS");
     }
 }

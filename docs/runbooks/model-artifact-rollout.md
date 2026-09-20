@@ -282,8 +282,19 @@ falls back there instead. `fromEnvironment` reproduces both verdicts. Every env-
 names the variable in its message, because on that path there is no Spring `BindException` to
 supply that context and the failure mode is a crash-looping pod.
 
-`recsys.model.recall.*` is deliberately **not** environment-sourced on the direct path: the same
-gap still exists there, and is recorded in the design doc's non-goals rather than fixed.
+`recsys.model.recall.*` is environment-sourced on the direct path too (`RECSYS_MODEL_RECALL_CORE_THREADS`,
+`_QUEUE_CAPACITY`, `_TIMEOUT_MS`), which closes the gap issue #342 recorded. One floor differs
+from the ONNX block and the difference is Spring's, measured:
+
+| Input | Spring | `fromEnvironment` |
+|---|---|---|
+| `core-threads=0` | accepted, expands to `2 × availableProcessors` | same |
+| `queue-capacity=0` / `timeout-ms=0` | rejected | rejected |
+| any of the three, set but blank | rejected | rejected |
+
+`0` is the documented "use the computed default" input for `core-threads` alone, so the
+minimum is a per-property parameter rather than the single "at least 1" rule the ONNX thread
+counts use. A shared floor would have rejected a valid input.
 
 ### Sizing
 

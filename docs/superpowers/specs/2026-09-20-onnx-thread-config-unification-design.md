@@ -111,6 +111,12 @@ and a future one will have the same trap.
   factory added here (`ModelServingProperties.fromEnvironment`) is the seam a follow-up would
   extend; the gap is called out in the PR so it is recorded rather than quietly inherited.
 
+  **Closed separately.** Filed as issue #342 and fixed in its own PR, which extended
+  `fromEnvironment` with `Recall.applyEnvironment`. The follow-up found one thing this
+  non-goal did not anticipate: `coreThreads` accepts `0` as "use `2 × availableProcessors`",
+  so the ONNX block's "at least 1" floor could not be reused and the minimum became a
+  per-property parameter.
+
 ## Design
 
 ### `ModelServingProperties.Onnx.fromEnvironment(EnvReader)`

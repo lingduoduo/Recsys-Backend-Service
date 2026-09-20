@@ -35,6 +35,36 @@ class DeepLearningPredictionOnnxConfigTest {
         }
     }
 
+    /**
+     * Observes whether the thread settings were read at all. The RecordingOpener above replaces
+     * the opener wholesale, so it can only prove the config was *resolved* and handed over — it
+     * never executes openOrtSession, where the config is actually applied. Deleting the
+     * OnnxSessionOptions.apply call leaves every test that uses RecordingOpener green (measured).
+     * SessionOptions exposes no getters, so a read of the config by the real opener is the only
+     * observable proxy for "these settings reached the session".
+     */
+    private static final class SpyOnnx extends ModelServingProperties.Onnx {
+        private final List<String> read = new ArrayList<>();
+
+        @Override
+        public int getIntraOpThreads() {
+            read.add("intraOpThreads");
+            return super.getIntraOpThreads();
+        }
+
+        @Override
+        public int getInterOpThreads() {
+            read.add("interOpThreads");
+            return super.getInterOpThreads();
+        }
+
+        @Override
+        public ModelServingProperties.ExecutionMode getExecutionMode() {
+            read.add("executionMode");
+            return super.getExecutionMode();
+        }
+    }
+
     private static ModelServingProperties.Onnx onnx(int intra, int inter,
                                                     ModelServingProperties.ExecutionMode mode) {
         ModelServingProperties.Onnx o = new ModelServingProperties.Onnx();
@@ -95,5 +125,26 @@ class DeepLearningPredictionOnnxConfigTest {
         assertThat(opener.opened.get(0).getInterOpThreads()).isEqualTo(1);
         assertThat(opener.opened.get(0).getExecutionMode())
                 .isEqualTo(ModelServingProperties.ExecutionMode.SEQUENTIAL);
+    }
+
+    /**
+     * The one test here that runs the REAL opener against real ONNX Runtime. Everything else in
+     * this class stubs the opener out, which is exactly the blind spot that let an unconfigured
+     * session ship: passing a null opener is what makes openOrtSession run.
+     */
+    @Test
+    void theRealOpenerAppliesEveryThreadSettingToTheSession() throws Exception {
+        SpyOnnx spy = new SpyOnnx();
+
+        DeepLearningPredictionService service =
+                new DeepLearningPredictionService(new ObjectMapper(), spy, null);
+
+        try {
+            assertThat(spy.read)
+                    .as("openOrtSession must apply all three settings to the SessionOptions")
+                    .contains("intraOpThreads", "interOpThreads", "executionMode");
+        } finally {
+            service.close();
+        }
     }
 }

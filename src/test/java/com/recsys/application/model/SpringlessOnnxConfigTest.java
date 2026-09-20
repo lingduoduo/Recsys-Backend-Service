@@ -16,9 +16,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * through these — a disagreement invisible while the defaults happen to match, and visible
  * exactly when someone is trying to tune.
  *
- * <p>Source-level rather than behavioural: constructing either class for real loads ONNX
- * artifacts and opens Redis pools, which is a far heavier thing than the property under test.
- * What has to hold is that neither site calls the bare constructor.
+ * <p>Source-level rather than behavioural, and the honest reason is not that construction is
+ * expensive — it is cheap; both constructors are field assignment, with the ONNX load deferred
+ * to UserTowerInferenceService.init() and the Redis/recall infra to ModelRuntimeProvider's lazy
+ * ensureRecallInfra(). The reason is that neither class exposes the resolved Onnx, and adding a
+ * public accessor to production code purely so a test can read it back buys less than it costs.
+ *
+ * <p>Know what this therefore does NOT catch: a brand-new third construction site, or a call
+ * that passes the factory's result somewhere wrong. It catches exactly one regression — either
+ * of these two sites reverting to the bare constructor — and it was watched failing for that.
+ * A line wrap in either call breaks it loudly, which is the acceptable cost of the technique.
  */
 class SpringlessOnnxConfigTest {
 

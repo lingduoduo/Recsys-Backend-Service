@@ -100,10 +100,10 @@ public class ModelServingProperties {
          * a deployment that overrode the variables.
          *
          * <p>Parsing goes through {@link EnvVars}, which throws on an unparseable value, rather than
-         * {@link EnvConfig}, which returns the default. Both paths must reject the same input: the
-         * Spring path already fails context startup on a non-numeric or non-positive value, and a
-         * variable that means one thing when Spring reads it and another when this does is the
-         * defect, not the fix.
+         * {@link EnvConfig}, which returns the default. The two paths are held to the same verdict
+         * on every input — including a blank thread count, which Spring rejects and which
+         * {@link #readThreadCount} therefore rejects too. A variable that means one thing when
+         * Spring reads it and another when this does is the defect, not the fix.
          */
         public static Onnx fromEnvironment() {
             return fromEnvironment(System::getenv);
@@ -117,9 +117,38 @@ public class ModelServingProperties {
 
         /** Routes through the setters so {@code @Positive} validation covers env-sourced values too. */
         private void applyEnvironment(EnvVars.EnvReader env) {
-            setIntraOpThreads(EnvVars.readInt(env, INTRA_OP_THREADS_ENV, intraOpThreads));
-            setInterOpThreads(EnvVars.readInt(env, INTER_OP_THREADS_ENV, interOpThreads));
+            setIntraOpThreads(readThreadCount(env, INTRA_OP_THREADS_ENV, intraOpThreads));
+            setInterOpThreads(readThreadCount(env, INTER_OP_THREADS_ENV, interOpThreads));
             setExecutionMode(readExecutionMode(env, executionMode));
+        }
+
+        /**
+         * A blank-but-present value is rejected rather than defaulted, because that is what the
+         * Spring path does. {@code ${RECSYS_MODEL_ONNX_INTRA_OP_THREADS:1}} supplies its default
+         * only when the variable is UNSET, so an empty value reaches a primitive {@code int}
+         * setter and fails context startup with "A null value cannot be assigned to a primitive
+         * type" — measured, not assumed. {@link #readExecutionMode} deliberately differs and
+         * accepts blank, because Spring binds the enum as a nullable object and falls back there.
+         * The asymmetry is Spring's; matching it is the whole point of this factory.
+         *
+         * <p>Every failure here names the variable. On the Spring path a {@code BindException}
+         * supplies that context; on this path nothing does, and the stated cost of failing fast
+         * is a crash-looping pod whose log line had better say which variable caused it.
+         */
+        private static int readThreadCount(EnvVars.EnvReader env, String name, int defaultValue) {
+            String raw = env.get(name);
+            if (raw == null) {
+                return defaultValue;
+            }
+            if (raw.isBlank()) {
+                throw new IllegalStateException("env var " + name
+                        + " is set but blank; unset it to use the default of " + defaultValue);
+            }
+            int value = EnvVars.readInt(env, name, defaultValue);
+            if (value < 1) {
+                throw new IllegalStateException("env var " + name + " must be at least 1, got: " + raw);
+            }
+            return value;
         }
 
         private static ExecutionMode readExecutionMode(EnvVars.EnvReader env, ExecutionMode defaultMode) {
@@ -131,7 +160,7 @@ public class ModelServingProperties {
                 return ExecutionMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
                 throw new IllegalStateException("env var " + EXECUTION_MODE_ENV
-                        + " is not a valid execution mode: " + raw);
+                        + " is not a valid execution mode: " + raw, e);
             }
         }
     }

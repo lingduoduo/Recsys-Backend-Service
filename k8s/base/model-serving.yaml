@@ -72,6 +72,13 @@ spec:
             # shows up as throttling, not throughput. Safety defaults, not capacity claims —
             # change only with InferenceLoadTest numbers from the same CPU shape. Pinned by
             # ModelServingManifestTest.
+            #
+            # These now reach EVERY OrtSession in the JVM. They did not always: the
+            # mlp_embedding session behind /api/v1/retrieval/* was created with bare
+            # SessionOptions and ran on ONNX Runtime's CPU-derived default (an intra-op pool
+            # of 4, measured on an 8-core host) while the two-tower sessions beside it
+            # honoured this value. ModelServingPropertiesTest and
+            # DeepLearningPredictionOnnxConfigTest pin that the value is read, not merely set.
             - name: RECSYS_MODEL_ONNX_INTRA_OP_THREADS
               value: "1"
             - name: RECSYS_MODEL_ONNX_INTER_OP_THREADS

@@ -232,7 +232,54 @@ fail naming `dssm_model.onnx` and `SHA-256`.
 |---|---|---|
 | `RECSYS_MODEL_ARTIFACTS_DIR` | classpath | Artifact root (§2). May be a symlink. |
 | `RECSYS_MODEL_FILE` | `dssm_model.onnx` | Model filename for **legacy** bundles only; a manifest's `model_file` wins. |
-| `RECSYS_MODEL_ONNX_INTRA_OP_THREADS` / `_INTER_OP_THREADS` / `_EXECUTION_MODE` | `1` / `1` / `SEQUENTIAL` | Native parallelism per session. `k8s/base` sets these explicitly; they are safety defaults, not measured capacity. |
+| `RECSYS_MODEL_ONNX_INTRA_OP_THREADS` / `_INTER_OP_THREADS` / `_EXECUTION_MODE` | `1` / `1` / `SEQUENTIAL` | Native parallelism for **every** session in the JVM — see §10. `k8s/base` sets these explicitly; they are safety defaults, not measured capacity. |
 | `RECSYS_MODEL_RECALL_CORE_THREADS` / `_QUEUE_CAPACITY` / `_TIMEOUT_MS` | `2×CPUs` / `256` / `200` | The bounded recall executor and per-channel deadline behind `recsys_model_recall_tasks_total`. |
 | `RECSYS_HEALTH_MAX_CONCURRENT_REQUESTS` | `64` (ConfigMap: `8`) | Admission cap behind `ModelServingShedding`. |
 | `RECSYS_HEALTH_MAX_FAILURE_RATE` / `RECSYS_HEALTH_MAX_AVG_LATENCY_MS` | `0.5` / `2000` (manifest: `0.05` / `500`) | Readiness thresholds. Both are `${...}` placeholders in `application.yml` on purpose — Spring relaxed binding does not map these underscore names to the dashed properties on its own. |
+
+## 10. ONNX session thread configuration
+
+`RECSYS_MODEL_ONNX_INTRA_OP_THREADS`, `_INTER_OP_THREADS` and `_EXECUTION_MODE` (defaults
+`1` / `1` / `SEQUENTIAL`) configure **every** ONNX Runtime session in the model service JVM:
+the per-variant two-tower sessions and the `mlp_embedding` session behind
+`/api/v1/retrieval/*`. They are applied in one place, `OnnxSessionOptions.apply`.
+
+This was not always true. The `mlp_embedding` session was created with bare `SessionOptions`
+and took ONNX Runtime's own default while the two-tower sessions beside it honoured the
+variables. If you are reading an incident from before that fix, the pod's real thread count
+was not what the manifest said.
+
+The values are read two ways, and both must agree:
+
+- Spring binds them via `application.yml`'s `${...}` placeholders into `ModelServingProperties`.
+- `ModelServingProperties.fromEnvironment()` reads them directly, for the constructors Spring
+  did not build — `UserTowerInferenceService`'s locator constructor, `ModelRuntimeProvider`'s
+  non-Spring constructor, and `DeepLearningPredictionService(ObjectMapper)`.
+
+Both reject the same input. A non-numeric, zero or negative thread count, or an unrecognised
+execution mode, **fails startup** rather than falling back to the default: the env path uses
+`EnvVars` (which throws) and not `EnvConfig` (which swallows), so a variable cannot mean one
+thing to Spring and another to a direct constructor. `recsys.model.recall.*` is deliberately
+**not** environment-sourced on the direct path — the same gap still exists there, and is
+recorded in the design doc's non-goals rather than fixed.
+
+### Sizing
+
+ONNX Runtime's intra-op pool costs `intraOpThreads - 1` native threads per session; the
+calling thread serves as one of the workers. Measured on an 8-core host against
+`mlp_embedding_model.onnx`, counting process threads with `ps -M` around session creation
+plus one inference:
+
+| `intraOpThreads` | Extra native threads |
+|---:|---:|
+| 1 | 0 |
+| 2 | 1 |
+| 4 | 3 |
+| 8 | 7 |
+| unset (ORT default) | 3 |
+
+Two consequences for operating this. The unset row is not a constant — ONNX Runtime derives
+it from the visible CPU count, so it is a property of the node the pod lands on. And these
+are **native** threads: they do not appear in `jvm_threads_live_threads` or any other JVM
+metric the services publish, so raising this value is invisible on the dashboards. Size it
+against the pod's CPU limit and `InferenceLoadTest`, not against an observed thread gauge.

@@ -31,9 +31,8 @@ public class ModelServingProperties {
     }
 
     /**
-     * A properties object for the code paths Spring did not build. Only the ONNX block is
-     * environment-sourced; {@code recsys.model.recall.*} keeps its hard-coded defaults here,
-     * deliberately -- see docs/superpowers/specs/2026-09-20-onnx-thread-config-unification-design.md.
+     * A properties object for the code paths Spring did not build, covering both blocks:
+     * {@code recsys.model.onnx.*} (PR #340) and {@code recsys.model.recall.*} (issue #342).
      */
     public static ModelServingProperties fromEnvironment() {
         return fromEnvironment(System::getenv);
@@ -42,6 +41,7 @@ public class ModelServingProperties {
     public static ModelServingProperties fromEnvironment(EnvVars.EnvReader env) {
         ModelServingProperties properties = new ModelServingProperties();
         properties.onnx.applyEnvironment(env);
+        properties.recall.applyEnvironment(env);
         return properties;
     }
 
@@ -117,39 +117,11 @@ public class ModelServingProperties {
 
         /** Routes through the setters so {@code @Positive} validation covers env-sourced values too. */
         private void applyEnvironment(EnvVars.EnvReader env) {
-            setIntraOpThreads(readThreadCount(env, INTRA_OP_THREADS_ENV, intraOpThreads));
-            setInterOpThreads(readThreadCount(env, INTER_OP_THREADS_ENV, interOpThreads));
+            setIntraOpThreads(readBoundedInt(env, INTRA_OP_THREADS_ENV, intraOpThreads, 1));
+            setInterOpThreads(readBoundedInt(env, INTER_OP_THREADS_ENV, interOpThreads, 1));
             setExecutionMode(readExecutionMode(env, executionMode));
         }
 
-        /**
-         * A blank-but-present value is rejected rather than defaulted, because that is what the
-         * Spring path does. {@code ${RECSYS_MODEL_ONNX_INTRA_OP_THREADS:1}} supplies its default
-         * only when the variable is UNSET, so an empty value reaches a primitive {@code int}
-         * setter and fails context startup with "A null value cannot be assigned to a primitive
-         * type" — measured, not assumed. {@link #readExecutionMode} deliberately differs and
-         * accepts blank, because Spring binds the enum as a nullable object and falls back there.
-         * The asymmetry is Spring's; matching it is the whole point of this factory.
-         *
-         * <p>Every failure here names the variable. On the Spring path a {@code BindException}
-         * supplies that context; on this path nothing does, and the stated cost of failing fast
-         * is a crash-looping pod whose log line had better say which variable caused it.
-         */
-        private static int readThreadCount(EnvVars.EnvReader env, String name, int defaultValue) {
-            String raw = env.get(name);
-            if (raw == null) {
-                return defaultValue;
-            }
-            if (raw.isBlank()) {
-                throw new IllegalStateException("env var " + name
-                        + " is set but blank; unset it to use the default of " + defaultValue);
-            }
-            int value = EnvVars.readInt(env, name, defaultValue);
-            if (value < 1) {
-                throw new IllegalStateException("env var " + name + " must be at least 1, got: " + raw);
-            }
-            return value;
-        }
 
         private static ExecutionMode readExecutionMode(EnvVars.EnvReader env, ExecutionMode defaultMode) {
             String raw = env.get(EXECUTION_MODE_ENV);
@@ -166,6 +138,10 @@ public class ModelServingProperties {
     }
 
     public static class Recall {
+
+        public static final String CORE_THREADS_ENV = "RECSYS_MODEL_RECALL_CORE_THREADS";
+        public static final String QUEUE_CAPACITY_ENV = "RECSYS_MODEL_RECALL_QUEUE_CAPACITY";
+        public static final String TIMEOUT_MS_ENV = "RECSYS_MODEL_RECALL_TIMEOUT_MS";
 
         @Min(0)
         private int coreThreads = defaultCoreThreads();
@@ -202,10 +178,95 @@ public class ModelServingProperties {
         public void setTimeoutMs(long timeoutMs) {
             this.timeoutMs = requirePositive(timeoutMs, "timeoutMs");
         }
+
+        /**
+         * The recall half of {@link ModelServingProperties#fromEnvironment}, closing the gap
+         * issue #342 recorded: {@code ModelRuntimeProvider} reads {@link #getCoreThreads()} and
+         * friends, so a construction path Spring did not build served hard-coded initializers
+         * here exactly as it did for the ONNX block before PR #340.
+         *
+         * <p>The floors are per-property and measured, not guessed. Spring ACCEPTS
+         * {@code core-threads=0} — it is the documented "use {@code 2 x availableProcessors}"
+         * input, and {@link #setCoreThreads} expands it — while REJECTING
+         * {@code queue-capacity=0} and {@code timeout-ms=0}. A single "at least 1" rule, which
+         * is what the ONNX block uses, would therefore reject a valid input here.
+         */
+        public static Recall fromEnvironment() {
+            return fromEnvironment(System::getenv);
+        }
+
+        public static Recall fromEnvironment(EnvVars.EnvReader env) {
+            Recall recall = new Recall();
+            recall.applyEnvironment(env);
+            return recall;
+        }
+
+        private void applyEnvironment(EnvVars.EnvReader env) {
+            // coreThreads is compared against the raw floor of 0 before the setter expands it,
+            // so "0" stays the valid "use the computed default" input Spring accepts.
+            setCoreThreads(readBoundedInt(env, CORE_THREADS_ENV, coreThreads, 0));
+            setQueueCapacity(readBoundedInt(env, QUEUE_CAPACITY_ENV, queueCapacity, 1));
+            setTimeoutMs(readBoundedLong(env, TIMEOUT_MS_ENV, timeoutMs, 1));
+        }
     }
 
     private static int defaultCoreThreads() {
         return Math.max(1, Runtime.getRuntime().availableProcessors() * 2);
+    }
+
+    /**
+     * A blank-but-present value is rejected rather than defaulted, because that is what the
+     * Spring path does. {@code ${RECSYS_MODEL_ONNX_INTRA_OP_THREADS:1}} supplies its default only
+     * when the variable is UNSET, so an empty value reaches a primitive setter and fails context
+     * startup with "A null value cannot be assigned to a primitive type" — measured against an
+     * {@code ApplicationContextRunner}, not assumed, and true of every numeric property in this
+     * class. {@code Onnx.readExecutionMode} deliberately differs and accepts blank, because
+     * Spring binds that enum as a nullable object and falls back there. The asymmetry is
+     * Spring's; matching it is the whole point of these factories.
+     *
+     * <p>{@code min} is a parameter rather than a constant because the floors genuinely differ:
+     * {@code Recall.coreThreads} accepts 0 as "use the computed default", where every ONNX thread
+     * count and the remaining recall settings require at least 1.
+     *
+     * <p>Every failure names the variable. On the Spring path a {@code BindException} supplies
+     * that context; on this path nothing does, and the stated cost of failing fast is a
+     * crash-looping pod whose log line had better say which variable caused it.
+     */
+    private static int readBoundedInt(EnvVars.EnvReader env, String name, int defaultValue, int min) {
+        String raw = requirePresentOrNull(env, name, defaultValue);
+        if (raw == null) {
+            return defaultValue;
+        }
+        int value = EnvVars.readInt(env, name, defaultValue);
+        if (value < min) {
+            throw new IllegalStateException("env var " + name + " must be at least " + min + ", got: " + raw);
+        }
+        return value;
+    }
+
+    private static long readBoundedLong(EnvVars.EnvReader env, String name, long defaultValue, long min) {
+        String raw = requirePresentOrNull(env, name, defaultValue);
+        if (raw == null) {
+            return defaultValue;
+        }
+        long value = EnvVars.readLong(env, name, defaultValue);
+        if (value < min) {
+            throw new IllegalStateException("env var " + name + " must be at least " + min + ", got: " + raw);
+        }
+        return value;
+    }
+
+    /** Returns null when the variable is unset; throws when it is set but blank. */
+    private static String requirePresentOrNull(EnvVars.EnvReader env, String name, Object defaultValue) {
+        String raw = env.get(name);
+        if (raw == null) {
+            return null;
+        }
+        if (raw.isBlank()) {
+            throw new IllegalStateException("env var " + name
+                    + " is set but blank; unset it to use the default of " + defaultValue);
+        }
+        return raw;
     }
 
     private static int requirePositive(int value, String propertyName) {

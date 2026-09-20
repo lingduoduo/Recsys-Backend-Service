@@ -95,6 +95,13 @@ and a future one will have the same trap.
 - **A separate knob for the mlp session.** One shared setting, deliberately.
 - **The other three services.** 6010, 7010 and 8010 create no ONNX session — `createSession`
   appears at exactly two call sites, both above.
+- **`recsys.model.recall.*`.** `ModelRuntimeProvider:250` reads `servingProperties.getRecall()`,
+  so the Spring-less constructor at `:98` leaks the same defect into the recall executor's
+  core-threads/queue-capacity/timeout: `RECSYS_MODEL_RECALL_*` is equally unread there. It is
+  the identical bug one field over, and it is deliberately left alone — this change is about
+  ONNX session threads, and widening it would make the diff argue two cases at once. The
+  factory added here (`ModelServingProperties.fromEnvironment`) is the seam a follow-up would
+  extend; the gap is called out in the PR so it is recorded rather than quietly inherited.
 
 ## Design
 

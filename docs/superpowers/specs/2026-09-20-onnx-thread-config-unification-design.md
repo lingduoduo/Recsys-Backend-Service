@@ -189,3 +189,32 @@ variables to anything but `1` today (`k8s/base/model-serving.yaml`, pinned by
 
 **The env-var read happens at construction, not refresh.** `fromEnvironment` is a snapshot;
 changing the variable requires a restart. That already describes every other env var here.
+
+## Discovered during implementation
+
+**The `<!-- ... -- ... -->` in the pom comment made the POM unparseable.** An em-dash rendered
+as `--` inside an XML comment is illegal, and Maven refuses to read the file at all. What is
+worth recording is not the typo but how it was nearly missed: the first `-Presilience` run
+after the edit *looked* like it passed, because the check was `ls target/surefire-reports/`
+and those reports were left over from the previous run. The build had actually died before
+running a single test. Deleting `target/surefire-reports` before a verification run is the
+difference between evidence and a stale artifact — a report file proves a test ran *at some
+point*, not that it ran now.
+
+**`-Dtest='A+B'` silently matches nothing** in this Surefire version; the separator is a
+comma. The plan used `+` throughout, copied from the syntax Surefire accepts for *method*
+selection. `-DfailIfNoTests=false` then turns "I ran no tests" into a green build, so the
+combination is quietly dangerous: `-Dtest='A+B' -DfailIfNoTests=false` reports success
+without executing anything. The plan's commands have not been rewritten, since they are a
+record of what was planned; the commands actually run used commas.
+
+**A third Spring-less default was found while editing.** `ModelRuntimeProvider`'s `@Autowired`
+constructor carries a null guard, `servingProperties == null ? new ModelServingProperties()`,
+which seats the same hard-coded defaults as the two sites the spec named. It was folded into
+Task 4 rather than left, since it is the identical expression one line away.
+
+**The measured ORT default is 4 intra-op threads on an 8-core host, not 8.** The spec says
+"derived from the visible CPU count", which the 1/2/4/8 sweep supports (delta is always
+`intraOp - 1`), but the derivation is evidently not one-thread-per-core. No claim about the
+exact formula is made anywhere in the change; what is stated is the measurement and that it
+varies with the host.

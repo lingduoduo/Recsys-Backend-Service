@@ -871,6 +871,15 @@
           <version>1.18.1</version>
         </dependency>
         <dependency>
+          <!-- flink-connector-kafka declares this `provided`: a Flink cluster supplies it at
+               runtime, but the MiniCluster tests need it explicitly. Test scope keeps it out of
+               the job jar. -->
+          <groupId>org.apache.flink</groupId>
+          <artifactId>flink-connector-base</artifactId>
+          <version>1.18.1</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
           <groupId>org.apache.flink</groupId>
           <artifactId>flink-connector-kafka</artifactId>
           <version>3.2.0-1.18</version>

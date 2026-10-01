@@ -93,6 +93,56 @@ class OnlineFeatureStreamingJobTest {
     }
 
     @Test
+    void topKSelectionHandlesTiesAndExtremeScores() {
+        Map<Integer, Long> scores = new LinkedHashMap<>();
+        scores.put(9, Long.MIN_VALUE);
+        scores.put(7, Long.MAX_VALUE);
+        scores.put(4, 0L);
+        scores.put(2, Long.MAX_VALUE);
+
+        assertThat(OnlineFeatureStreamingJob.selectTopK(scores, 2))
+                .extracting(movie -> movie.movieId).containsExactly(2, 7);
+        assertThat(OnlineFeatureStreamingJob.selectTopK(scores, Integer.MAX_VALUE))
+                .extracting(movie -> movie.movieId).containsExactly(2, 7, 4, 9);
+        assertThat(scores).containsAllEntriesOf(Map.of(
+                9, Long.MIN_VALUE, 7, Long.MAX_VALUE, 4, 0L, 2, Long.MAX_VALUE));
+    }
+
+    @Test
+    void topKSelectionHandlesEmptyAndInvalidLimits() {
+        assertThat(OnlineFeatureStreamingJob.selectTopK(Map.of(), 10)).isEmpty();
+        assertThat(OnlineFeatureStreamingJob.selectTopK(Map.of(1, 5L), 0)).isEmpty();
+        assertThatThrownBy(() -> OnlineFeatureStreamingJob.selectTopK(Map.of(), -1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OnlineFeatureStreamingJob.selectTopK(Map.of(1, 5L), -1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void topKSelectionMatchesFullSortAcrossCutoffs() {
+        Random random = new Random(731);
+        for (int round = 0; round < 20; round++) {
+            Map<Integer, Long> scores = new LinkedHashMap<>();
+            for (int id = 200; id > 0; id--) {
+                scores.put(id, (long) random.nextInt(30) - 15);
+            }
+            List<Map.Entry<Integer, Long>> expected = new ArrayList<>(scores.entrySet());
+            expected.sort((left, right) -> {
+                int byScore = Long.compare(right.getValue(), left.getValue());
+                return byScore != 0 ? byScore : Integer.compare(left.getKey(), right.getKey());
+            });
+            for (int k : new int[]{0, 1, 2, 10, 199, 200, 201, Integer.MAX_VALUE}) {
+                var result = OnlineFeatureStreamingJob.selectTopK(scores, k);
+                var selected = expected.subList(0, Math.min(k, expected.size()));
+                assertThat(result).extracting(movie -> movie.movieId)
+                        .containsExactlyElementsOf(selected.stream().map(Map.Entry::getKey).toList());
+                assertThat(result).extracting(movie -> movie.score)
+                        .containsExactlyElementsOf(selected.stream().map(Map.Entry::getValue).toList());
+            }
+        }
+    }
+
+    @Test
     void partialTopKIsBoundedAndUsesStableTieOrdering() throws Exception {
         var function = new OnlineFeatureStreamingJob.PartialTopKWindowFunction(2);
         List<OnlineFeatureStreamingJob.PartialTopK> output = new ArrayList<>();

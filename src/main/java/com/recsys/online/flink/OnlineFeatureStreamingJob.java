@@ -53,6 +53,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -783,6 +784,29 @@ public final class OnlineFeatureStreamingJob {
         }
     }
 
+    /** Selects only the best K candidates, ordered by score descending and movie ID ascending. */
+    static List<ScoredMovie> selectTopK(Map<Integer, Long> scores, int topK) {
+        if (topK < 0) throw new IllegalArgumentException("topK must not be negative");
+        if (topK == 0 || scores.isEmpty()) return new ArrayList<>();
+
+        Comparator<ScoredMovie> ranking = Comparator.comparingLong((ScoredMovie movie) -> movie.score)
+                .reversed().thenComparingInt(movie -> movie.movieId);
+        // The worst retained candidate is evicted first; do not allocate from unbounded topK.
+        PriorityQueue<ScoredMovie> candidates = new PriorityQueue<>(ranking.reversed());
+        for (Map.Entry<Integer, Long> entry : scores.entrySet()) {
+            ScoredMovie movie = new ScoredMovie(entry.getKey(), entry.getValue());
+            if (candidates.size() < topK) {
+                candidates.add(movie);
+            } else if (ranking.compare(movie, candidates.peek()) < 0) {
+                candidates.poll();
+                candidates.add(movie);
+            }
+        }
+        List<ScoredMovie> ranked = new ArrayList<>(candidates);
+        ranked.sort(ranking);
+        return ranked;
+    }
+
     static final class PartialTopKWindowFunction
             implements WindowFunction<MovieEvent, PartialTopK, Integer, TimeWindow> {
         private final int topK;
@@ -799,12 +823,7 @@ public final class OnlineFeatureStreamingJob {
                 scores.merge(event.movieId, event.engagementWeight(), Long::sum);
             }
 
-            List<ScoredMovie> ranked = scores.entrySet().stream()
-                    .sorted(Map.Entry.<Integer, Long>comparingByValue(Comparator.reverseOrder())
-                            .thenComparing(Map.Entry::getKey))
-                    .limit(topK)
-                    .map(entry -> new ScoredMovie(entry.getKey(), entry.getValue()))
-                    .collect(Collectors.toCollection(ArrayList::new));
+            List<ScoredMovie> ranked = selectTopK(scores, topK);
 
             out.collect(new PartialTopK(window.getEnd(), bucket, ranked));
         }
@@ -878,10 +897,8 @@ public final class OnlineFeatureStreamingJob {
             }
             Long emitAt = emitTimer.value();
             if (emitAt == null || timestamp != emitAt || Boolean.TRUE.equals(emitted.value())) return;
-            List<PartialTopK> available = new ArrayList<>();
-            for (PartialTopK partial : partials.get()) available.add(partial);
             long windowEnd = context.getCurrentKey();
-            out.collect(new TopKSnapshot(windowLabel, mergeTopK(available, topK),
+            out.collect(new TopKSnapshot(windowLabel, mergeTopK(partials.get(), topK),
                     windowEnd, ttlSeconds, "window-" + windowEnd));
             partials.clear();
             emitTimer.clear();
@@ -913,12 +930,7 @@ public final class OnlineFeatureStreamingJob {
                     scores.merge(movie.movieId, movie.score, Long::sum);
                 }
             }
-            return scores.entrySet().stream()
-                    .sorted(Map.Entry.<Integer, Long>comparingByValue(Comparator.reverseOrder())
-                            .thenComparing(Map.Entry::getKey))
-                    .limit(topK)
-                    .map(entry -> new ScoredMovie(entry.getKey(), entry.getValue()))
-                    .collect(Collectors.toCollection(ArrayList::new));
+            return selectTopK(scores, topK);
         }
     }
 

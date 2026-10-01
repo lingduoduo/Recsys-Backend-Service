@@ -40,6 +40,23 @@ its own harness. No change to production code.
   report it as a finding with its evidence instead of loosening the assertion. A genuine job
   defect gets its own design.
 
+## Findings during execution
+The stop rule was reserved for job defects and for loosening assertions. Fixing (1) and (2)
+exposed two more defects. Both were in the harness, and each fix makes the test stricter:
+4. **Baseline race.** The pre-savepoint stage read its baseline from the sink size as soon as the
+   window-2000 snapshot appeared, but the snapshot can be emitted before every "advance" record
+   reaches the events sink. Measured: 901 delivered = 768 initial + 96 advance + 37 batch, with 0
+   duplicate ids, against 874 expected. Fix: compute the expected count from the inputs.
+5. **The restore never restored.** Flink 1.18's `PipelineExecutorUtils.getJobGraph` overwrites the
+   job graph's restore settings with the environment configuration's (verified with `javap`), so
+   `StreamGraph.setSavepointRestoreSettings` is silently dropped. The "rescaled restore" started
+   from scratch and re-read the whole topic: 1023 events against 122 expected. Fix: put
+   `execution.savepoint.path` in the local environment's `Configuration`. Production is unaffected:
+   `flink run -s` sets the configuration.
+
+Each fix fails the test on its own when reverted: (2) at the ordering assertion, (4) at the
+pre-savepoint count, and (5) at the post-restore count.
+
 ## Alternatives
 - Make the ordering assertion order-insensitive: hides exactly the property the test exists to
   pin (per-user order across partitions and rescale). Rejected.

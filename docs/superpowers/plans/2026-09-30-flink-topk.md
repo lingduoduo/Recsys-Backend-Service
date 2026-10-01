@@ -1,6 +1,6 @@
 # Flink Top-K Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Reduce Top-K selection work and remove duplicated ranking logic without changing job behavior.
 
@@ -35,7 +35,7 @@
 - Consumes: existing score maps and `Iterable<PartialTopK>`.
 - Produces: `static List<ScoredMovie> selectTopK(Map<Integer, Long> scores, int topK)`.
 
-- [ ] Add tests for all Review Focus cases and an independent full-sort oracle. Core literal fixture:
+- [x] Add tests for all Review Focus cases and an independent full-sort oracle. Core literal fixture:
 ```java
 var scores = Map.of(9, Long.MIN_VALUE, 7, Long.MAX_VALUE, 2, Long.MAX_VALUE, 4, 0L);
 assertThat(OnlineFeatureStreamingJob.selectTopK(scores, 2))
@@ -44,8 +44,8 @@ assertThat(OnlineFeatureStreamingJob.selectTopK(scores, 0)).isEmpty();
 assertThatThrownBy(() -> OnlineFeatureStreamingJob.selectTopK(Map.of(), -1))
         .isInstanceOf(IllegalArgumentException.class);
 ```
-- [ ] Run `mvn -Pstreaming-flink test -Dtest=OnlineFeatureStreamingJobTest`. Expected: compilation fails because selectTopK does not exist yet.
-- [ ] Implement the shared selector with this algorithm; use PriorityQueue import and a descending-score/ascending-ID comparator:
+- [x] Run `mvn -Pstreaming-flink test -Dtest=OnlineFeatureStreamingJobTest`. Expected: compilation fails because selectTopK does not exist yet.
+- [x] Implement the shared selector with this algorithm; use PriorityQueue import and a descending-score/ascending-ID comparator:
 ```java
 if (topK < 0) throw new IllegalArgumentException("topK must not be negative");
 if (topK == 0 || scores.isEmpty()) return new ArrayList<>();
@@ -64,7 +64,12 @@ var ranked = new ArrayList<>(candidates);
 ranked.sort(ranking);
 return ranked;
 ```
-- [ ] Replace both full-sort pipelines with `selectTopK(scores, topK)`. Replace the final temporary partial list with `mergeTopK(partials.get(), topK)`; retain state clearing after collection.
-- [ ] Run `mvn -Pstreaming-flink test -Dtest=KafkaTopicPartitionValidatorTest,OnlineFeatureStreamingJobTest,MovieEventTest`. Expected: success; report infrastructure-dependent skips.
-- [ ] Run `git diff --check`, inspect the diff for state/graph changes, and commit source plus tests as `perf(flink): bound top-k selection and simplify final merge`.
-- [ ] Obtain a whole-branch code review, address material findings, and open a PR with the validation results and performance limits.
+- [x] Replace both full-sort pipelines with `selectTopK(scores, topK)`. Replace the final temporary partial list with `mergeTopK(partials.get(), topK)`; retain state clearing after collection.
+- [x] Run `mvn -Pstreaming-flink test -Dtest=KafkaTopicPartitionValidatorTest,OnlineFeatureStreamingJobTest,MovieEventTest`. Expected: success; report infrastructure-dependent skips.
+- [x] Run `git diff --check`, inspect the diff for state/graph changes, and commit source plus tests as `perf(flink): bound top-k selection and simplify final merge`.
+- [x] Obtain a whole-branch code review, address material findings, and open a PR with the validation results and performance limits.
+
+## Execution notes
+The unmodified baseline fails Maven dependency convergence checks for jsr305, checker-qual, commons-compress, snappy-java, error_prone_annotations, kryo, and kafka-clients. Focused test commands therefore use `-Denforcer.skip=true` only on the command line. No dependency changes are included. Baseline with this flag: 41 tests, zero failures/errors, six Docker-dependent skips.
+
+Final focused validation: 44 tests, zero failures/errors, six Docker-dependent skips (38 passed). The pre-implementation test compile failed for the missing selector as expected. `git diff --check` passed. Independent whole-branch review found no issues.

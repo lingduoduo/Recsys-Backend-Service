@@ -86,8 +86,9 @@ class KafkaFlinkPartitionIntegrationTest {
         assertThat(writtenPartitions).hasSizeGreaterThanOrEqualTo(12);
 
         // Advance event time so the production partial/final Top-K stages emit a real window.
-        send(topic, java.util.stream.IntStream.rangeClosed(1, 96)
-                .mapToObj(user -> event("advance-" + user, user, user % 31 + 1, 4_000L)).toList());
+        List<MovieEvent> advance = java.util.stream.IntStream.rangeClosed(1, 96)
+                .mapToObj(user -> event("advance-" + user, user, user % 31 + 1, 4_000L)).toList();
+        send(topic, advance);
         await(Duration.ofSeconds(45), () -> snapshot(firstRun, 2_000L) != null);
         assertExactTopK(snapshot(firstRun, 2_000L), initial, 10);
 
@@ -96,7 +97,9 @@ class KafkaFlinkPartitionIntegrationTest {
         List<MovieEvent> beforeSavepoint = scoredEvents("before", 500, 1, 8, 6_000L, false);
         MovieEvent sharedBeforeSavepoint = event("shared-event-id", 501, 15, 6_000L);
         beforeSavepoint.add(sharedBeforeSavepoint);
-        int acceptedBeforeSavepoint = TestSink.events(firstRun).size() + beforeSavepoint.size();
+        // Count from the inputs, not the sink: the window-2000 snapshot can be emitted before every
+        // advance record reaches the events sink, so a sink-size baseline is taken mid-delivery.
+        int acceptedBeforeSavepoint = initial.size() + advance.size() + beforeSavepoint.size();
         send(topic, beforeSavepoint);
         await(Duration.ofSeconds(45), () -> TestSink.events(firstRun).size() == acceptedBeforeSavepoint);
 
@@ -154,7 +157,14 @@ class KafkaFlinkPartitionIntegrationTest {
     }
 
     private JobClient start(String topic, String run, int operatorParallelism, String savepoint) throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(PARTITIONS);
+        // The restore path must travel in the environment's configuration: when the job is
+        // submitted, PipelineExecutorUtils.getJobGraph overwrites the job graph's restore settings
+        // with the configuration's, so StreamGraph.setSavepointRestoreSettings is silently dropped.
+        org.apache.flink.configuration.Configuration environment = new org.apache.flink.configuration.Configuration();
+        if (savepoint != null) {
+            SavepointRestoreSettings.toConfiguration(SavepointRestoreSettings.forPath(savepoint), environment);
+        }
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(PARTITIONS, environment);
         env.setRestartStrategy(RestartStrategies.noRestart());
         env.enableCheckpointing(500L);
         Map<String, String> values = new java.util.HashMap<>();
@@ -172,13 +182,15 @@ class KafkaFlinkPartitionIntegrationTest {
         OnlineFeatureStreamingJob.PartitionGraph graph = OnlineFeatureStreamingJob.buildPartitionGraph(
                 OnlineFeatureStreamingJob.buildEventStream(env, params, configuration), configuration,
                 10, PARTITIONS, 1_000L, 100L, 200L);
-        graph.events().addSink(new TestSink<>(run, "events")).name("test-events-" + run);
-        graph.snapshots().addSink(new TestSink<>(run, "snapshots")).name("test-snapshots-" + run);
+        // The environment defaults to 24, but dedup runs at operatorParallelism; a mismatch inserts
+        // a REBALANCE edge that scatters one user's records across sink subtasks and destroys the
+        // per-user order this test asserts. Matching parallelism makes the edge FORWARD.
+        graph.events().addSink(new TestSink<>(run, "events")).name("test-events-" + run)
+                .setParallelism(operatorParallelism);
+        graph.snapshots().addSink(new TestSink<>(run, "snapshots")).name("test-snapshots-" + run)
+                .setParallelism(operatorParallelism);
         StreamGraph streamGraph = env.getStreamGraph();
         streamGraph.setJobName("partition-contract-" + run);
-        if (savepoint != null) {
-            streamGraph.setSavepointRestoreSettings(SavepointRestoreSettings.forPath(savepoint));
-        }
         JobClient client = env.executeAsync(streamGraph);
         jobs.add(client);
         return client;

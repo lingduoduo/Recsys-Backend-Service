@@ -381,7 +381,7 @@ class OnlineFeatureStreamingJobTest {
                 "key", "state", 1L, 60, "event"));
         var configuration = new OnlineFeatureStreamingJob.JobConfiguration(24, 1, 1, 128);
         OnlineFeatureStreamingJob.attachSink(input,
-                new OnlineFeatureStreamingJob.RedisStringFeatureSink("localhost", 6379, null, null, false),
+                new OnlineFeatureStreamingJob.RedisStringFeatureSink(LOCAL_REDIS),
                 true,
                 "redis-test-sink", "redis-test-sink-v1", configuration);
 
@@ -395,7 +395,7 @@ class OnlineFeatureStreamingJobTest {
         var normalInput = normalEnv.fromElements(new OnlineFeatureStreamingJob.StringFeatureUpdate(
                 "key", "state", 1L, 60, "event"));
         OnlineFeatureStreamingJob.attachSink(normalInput,
-                new OnlineFeatureStreamingJob.RedisStringFeatureSink("localhost", 6379, null, null, false),
+                new OnlineFeatureStreamingJob.RedisStringFeatureSink(LOCAL_REDIS),
                 false,
                 "redis-test-sink", "redis-test-sink-v1", configuration);
         assertThat(normalEnv.getStreamGraph().getStreamNodes()).anyMatch(
@@ -510,6 +510,12 @@ class OnlineFeatureStreamingJobTest {
     static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine")
             .withExposedPorts(6379);
 
+    private static final OnlineFeatureStreamingJob.RedisEndpoint LOCAL_REDIS = endpoint("localhost", 6379);
+
+    private static OnlineFeatureStreamingJob.RedisEndpoint endpoint(String host, int port) {
+        return new OnlineFeatureStreamingJob.RedisEndpoint(host, port, null, null, false);
+    }
+
     private static GenericContainer<?> redis() {
         assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
                 "Docker is required for Redis integration tests");
@@ -531,8 +537,7 @@ class OnlineFeatureStreamingJobTest {
     void equalTimestampUsesEventIdTieBreakerRegardlessOfArrivalOrder() throws Exception {
         GenericContainer<?> redis = redis();
         withRedis(redis.getHost(), redis.getMappedPort(6379), RedisCommands::flushall);
-        var sink = new OnlineFeatureStreamingJob.RedisTopKSink(
-                redis.getHost(), redis.getMappedPort(6379), null, null, false);
+        var sink = new OnlineFeatureStreamingJob.RedisTopKSink(endpoint(redis.getHost(), redis.getMappedPort(6379)));
         sink.open(new Configuration());
         try {
             sink.apply(snapshot(1_000L, "b", scored(2, 9)));
@@ -548,8 +553,7 @@ class OnlineFeatureStreamingJobTest {
     void replayOfIdenticalTopKVersionIsNoOp() throws Exception {
         GenericContainer<?> redis = redis();
         withRedis(redis.getHost(), redis.getMappedPort(6379), RedisCommands::flushall);
-        var sink = new OnlineFeatureStreamingJob.RedisTopKSink(
-                redis.getHost(), redis.getMappedPort(6379), null, null, false);
+        var sink = new OnlineFeatureStreamingJob.RedisTopKSink(endpoint(redis.getHost(), redis.getMappedPort(6379)));
         sink.open(new Configuration());
         try {
             var value = snapshot(2_000L, "replay", scored(2, 9));
@@ -564,8 +568,7 @@ class OnlineFeatureStreamingJobTest {
     void atomicScriptUpdatesAllTopKRepresentationsAndLineage() throws Exception {
         GenericContainer<?> redis = redis();
         withRedis(redis.getHost(), redis.getMappedPort(6379), RedisCommands::flushall);
-        var sink = new OnlineFeatureStreamingJob.RedisTopKSink(
-                redis.getHost(), redis.getMappedPort(6379), null, null, false);
+        var sink = new OnlineFeatureStreamingJob.RedisTopKSink(endpoint(redis.getHost(), redis.getMappedPort(6379)));
         sink.open(new Configuration());
         try {
             sink.apply(snapshot(3_000L, "evt-topk", scored(2, 9)));
@@ -658,7 +661,7 @@ class OnlineFeatureStreamingJobTest {
         String host = redis.getHost();
         int port = redis.getMappedPort(6379);
 
-        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(host, port, null, null, false);
+        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(endpoint(host, port));
         sink.open(new Configuration());
         try {
             var update = new OnlineFeatureStreamingJob.StringFeatureUpdate(
@@ -684,7 +687,7 @@ class OnlineFeatureStreamingJobTest {
         String host = redis.getHost();
         int port = redis.getMappedPort(6379);
 
-        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(host, port, null, null, false);
+        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(endpoint(host, port));
         sink.open(new Configuration());
         try {
             sink.invoke(new OnlineFeatureStreamingJob.StringFeatureUpdate(
@@ -711,7 +714,7 @@ class OnlineFeatureStreamingJobTest {
         String host = redis.getHost();
         int port = redis.getMappedPort(6379);
 
-        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(host, port, null, null, false);
+        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(endpoint(host, port));
         sink.open(new Configuration());
         try {
             for (int i = 1; i <= 6; i++) {
@@ -725,6 +728,87 @@ class OnlineFeatureStreamingJobTest {
                 assertThat(history).hasSize(5);
                 assertThat(history.get(0)).isEqualTo("evt-002");
                 assertThat(history.get(4)).isEqualTo("evt-006");
+            });
+        } finally {
+            sink.close();
+        }
+    }
+
+    @Test
+    void fixedSixFormattingMatchesStringFormatByteForByte() {
+        Random random = new Random(42);
+        List<Double> values = new ArrayList<>(List.of(0.0, -0.0, 1.0, -1.0, 5e-7, 1.5e-6, 2.5e-6, 2.5e-7,
+                -1e-9, 4.35e-6, 123_456_789.0, Double.MIN_VALUE, Double.MAX_VALUE,
+                Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY));
+        for (int i = 0; i < 200_000; i++) {
+            values.add(switch (i % 5) {
+                case 0 -> random.nextDouble();
+                case 1 -> (double) random.nextInt(1_000_000);
+                case 2 -> random.nextDouble() * 1e6;
+                case 3 -> random.nextInt(1_000) / (double) (1 + random.nextInt(1_000));
+                default -> Math.round(random.nextDouble() * 1e7) / 1e7;
+            });
+        }
+        for (double value : values) {
+            StringBuilder builder = new StringBuilder();
+            OnlineFeatureStreamingJob.UserEmbeddingFunction.appendFixed6(builder, value);
+            assertThat(builder.toString()).as("value %s", value)
+                    .isEqualTo(String.format(java.util.Locale.ROOT, "%.6f", value));
+        }
+    }
+
+    @Test
+    void finalTopKCleansUpTimersRestoredFromADifferentAllowedLateness() throws Exception {
+        org.apache.flink.runtime.checkpoint.OperatorSubtaskState snapshot;
+        try (var harness = finalTopKHarness(10L)) {
+            harness.open();
+            harness.processElement(new StreamRecord<>(partial(100, 0, scored(1, 3))));
+            harness.processWatermark(new Watermark(100));
+            assertThat(snapshots(harness.getOutput())).hasSize(1);
+            assertThat(harness.numKeyedStateEntries()).isPositive();
+            snapshot = harness.snapshot(1L, 1L);
+        }
+        // Restored with a longer lateness, the pending cleanup timer (110) no longer matches
+        // cleanupTimestamp(100, 50); it must still clear the window rather than leak it.
+        try (var restored = finalTopKHarness(50L)) {
+            restored.initializeState(snapshot);
+            restored.open();
+            restored.processWatermark(new Watermark(110));
+            assertThat(restored.numKeyedStateEntries()).isZero();
+            assertThat(snapshots(restored.getOutput())).isEmpty();
+        }
+    }
+
+    private static KeyedOneInputStreamOperatorTestHarness<Long, OnlineFeatureStreamingJob.PartialTopK,
+            OnlineFeatureStreamingJob.TopKSnapshot> finalTopKHarness(long allowedLatenessMs) throws Exception {
+        return new KeyedOneInputStreamOperatorTestHarness<>(
+                new KeyedProcessOperator<>(new OnlineFeatureStreamingJob.FinalTopKWindowFunction(
+                        3, "hour", 60, 4, allowedLatenessMs)),
+                OnlineFeatureStreamingJob.PartialTopK::windowEnd,
+                org.apache.flink.api.common.typeinfo.Types.LONG);
+    }
+
+    @Test
+    void sinkRecoversWhenRedisForgetsTheCachedScript() throws Exception {
+        GenericContainer<?> redis = redis();
+        String host = redis.getHost();
+        int port = redis.getMappedPort(6379);
+        withRedis(host, port, RedisCommands::flushall);
+
+        var sink = new OnlineFeatureStreamingJob.RedisStringFeatureSink(endpoint(host, port));
+        sink.open(new Configuration());
+        try {
+            sink.invoke(new OnlineFeatureStreamingJob.StringFeatureUpdate(
+                    "u2vEmb:40", "0.1 0.2", 1000L, 3600, "evt-before"), null);
+            // What a restart or failover to a fresh primary looks like to a long-lived sink.
+            withRedis(host, port, RedisCommands::scriptFlush);
+            sink.invoke(new OnlineFeatureStreamingJob.StringFeatureUpdate(
+                    "u2vEmb:40", "0.3 0.4", 2000L, 3600, "evt-after"), null);
+
+            withRedis(host, port, cmd -> {
+                assertThat(cmd.get("u2vEmb:40")).isEqualTo("0.3 0.4");
+                assertThat(cmd.lrange("u2vEmb:40:event_history", 0, -1))
+                        .containsExactly("evt-before", "evt-after");
             });
         } finally {
             sink.close();

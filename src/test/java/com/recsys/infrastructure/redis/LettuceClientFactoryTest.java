@@ -26,6 +26,12 @@ class LettuceClientFactoryTest {
     }
 
     @Test
+    void standaloneModeRejectsAnExcludedWriteEndpoint() {
+        assertThrows(IllegalArgumentException.class, () -> LettuceClientFactory.uriFromEnv(Map.of(
+                "REDIS_MODE", "standalone", "REDIS_HOST", ""), Integer.MAX_VALUE));
+    }
+
+    @Test
     void defaultModeIsStandaloneLocalhost() {
         RedisURI uri = LettuceClientFactory.uriFromEnv(Map.of(), Integer.MAX_VALUE);
         assertEquals("localhost", uri.getHost());

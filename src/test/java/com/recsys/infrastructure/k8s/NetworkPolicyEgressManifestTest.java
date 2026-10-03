@@ -274,6 +274,18 @@ class NetworkPolicyEgressManifestTest {
     }
 
     @Test
+    void sentinelClientsCanReachDiscoveredRedisPods() throws IOException {
+        var docs = baseDocuments();
+        for (String workload : List.of("recsys-api-gateway", "recsys-catalog-serving",
+                "recsys-model-serving", "recsys-online-serving")) {
+            assertThat(permitsEgress(policyFor(workload, docs), Map.of("app", "redis"), 6379))
+                    .as("%s must reach discovered pod IPs even with REDIS_HOST excluded", workload).isTrue();
+            assertThat(admitsIngress(policyFor("redis", docs), Map.of("app", workload), 6379))
+                    .as("Redis must admit %s on the discovered data connection", workload).isTrue();
+        }
+    }
+
+    @Test
     void everyDeclaredUpstreamIsPermittedByEgress() throws IOException {
         List<Map<String, Object>> docs = baseDocuments();
 

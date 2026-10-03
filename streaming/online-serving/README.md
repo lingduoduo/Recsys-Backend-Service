@@ -385,3 +385,19 @@ This models the production split where:
 ```bash
 docker compose -f streaming/online-serving/docker-compose.yml down
 ```
+
+### Redis failover in Kubernetes
+
+For the in-cluster Redis tier, writers must use Sentinel discovery. The `redis-primary`
+Service is bootstrap-only and can route to a read-only replica after an election; the
+static `redis` alias is no longer deployed. Configure the driver with `REDIS_MODE=sentinel`,
+`REDIS_SENTINEL_MASTER=mymaster`, and `REDIS_SENTINEL_NODES` from `recsys-config`, plus the
+existing Redis credentials. Both jobs capture these values and serialize them to workers.
+
+Flink supports `--redis.mode sentinel --redis.sentinel-master mymaster
+--redis.sentinel-nodes sentinel-a:26379,sentinel-b:26379`. Spark ItemEmbeddingJob uses
+`--redis-mode=sentinel --redis-sentinel-master=mymaster
+--redis-sentinel-nodes=sentinel-a:26379,sentinel-b:26379`. Host/port arguments apply only in
+standalone mode, which remains appropriate for local demo scripts and ElastiCache.
+Explicit arguments override driver environment settings. Never use bootstrap Services as
+application write hosts. See [the deployment upgrade steps](../../docs/system_design/04_Replication.md).

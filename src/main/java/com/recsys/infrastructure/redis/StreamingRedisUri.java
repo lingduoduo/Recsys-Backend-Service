@@ -15,12 +15,28 @@ import io.lettuce.core.RedisURI;
  * applied they fail {@code NOAUTH}, and {@code OnlineFeatureStreamingJob} writes {@code u2vEmb:*}
  * and {@code topk:*} that every serving path reads.
  *
- * <p>Delegates to {@link LettuceClientFactory#standaloneUri} rather than reimplementing it. A job
- * and a service must authenticate identically against the same server; {@code StreamingRedisUriTest}
- * asserts equality with that method rather than against a hand-written URI, so the two cannot drift
- * apart in the same edit.
+ * <p>Delegates to the shared standalone and Sentinel URI builders. Jobs snapshot connection
+ * settings on the driver and build the URI inside workers, so neither a non-serializable URI nor
+ * worker-local environment defaults can change which primary receives writes.
  */
 public final class StreamingRedisUri {
+
+    /** Builds inside the worker from serialized settings; Sentinel never uses the static host. */
+    public static RedisURI from(String host, int port, String username, String password,
+                                boolean tls, String mode, String master, String nodes) {
+        if ("sentinel".equalsIgnoreCase(mode)) {
+            if (master == null || master.isBlank() || nodes == null || nodes.isBlank()) {
+                throw new IllegalArgumentException("Sentinel mode requires redis sentinel master and nodes");
+            }
+            return LettuceClientFactory.sentinelUri(master, nodes,
+                    username == null ? "" : username, password == null ? "" : password,
+                    tls, LettuceClientFactory.DEFAULT_TIMEOUT_MS);
+        }
+        if (mode != null && !mode.isBlank() && !"standalone".equalsIgnoreCase(mode)) {
+            throw new IllegalArgumentException("Unknown Redis mode: " + mode);
+        }
+        return from(host, port, username, password, tls);
+    }
 
     private StreamingRedisUri() {
     }

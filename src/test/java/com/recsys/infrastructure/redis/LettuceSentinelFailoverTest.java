@@ -25,6 +25,8 @@ class LettuceSentinelFailoverTest {
     void establishedSharedAndPooledConnectionsFollowSentinelPromotion() throws Exception {
         int primaryPort = port(), replicaPort = port(), sentinelPort = port();
         String password = "failover-test-password";
+        io.lettuce.core.RedisClient streamingClient = null;
+        io.lettuce.core.api.StatefulRedisConnection<String, String> streamingConnection = null;
         try {
             Process primary = start("primary", "port " + primaryPort + "\nrequirepass " + password);
             Process replica = start("replica", "port " + replicaPort + "\nrequirepass " + password
@@ -47,11 +49,19 @@ class LettuceSentinelFailoverTest {
                 // Warm the dedicated pool before failure as well as the shared connection.
                 var pooledCommands = executor.executePrimaryRead(c -> c, Duration.ofSeconds(2));
                 assertEquals("before", pooledCommands.get("canary"));
+                // Same raw RedisClient/URI path used by Flink and Spark workers.
+                streamingClient = io.lettuce.core.RedisClient.create(StreamingRedisUri.from(
+                        "", 6379, "", password, false, "sentinel", "mymaster", "127.0.0.1:" + sentinelPort));
+                streamingConnection = streamingClient.connect();
+                var streamingCommands = streamingConnection.sync();
+                assertEquals("OK", streamingCommands.set("streaming-canary", "before"));
                 primary.destroyForcibly().waitFor();
                 await(() -> "OK".equals(executor.execute(c -> c.set("canary", "after"))));
                 await(() -> "after".equals(executor.executePrimaryRead(c -> c.get("canary"), Duration.ofSeconds(2))));
                 assertSame(pooledCommands, executor.executePrimaryRead(c -> c, Duration.ofSeconds(2)),
                         "The established pooled connection must recover rather than be replaced");
+                await(() -> "OK".equals(streamingCommands.set("streaming-canary", "after")));
+                assertEquals("after", replicaClient.execute(c -> c.get("streaming-canary")));
                 assertTrue(replica.isAlive());
                 assertTrue(replicaClient.execute(c -> c.info("replication")).contains("role:master"));
                 assertEquals("after", replicaClient.execute(c -> c.get("canary")));
@@ -67,6 +77,8 @@ class LettuceSentinelFailoverTest {
                 }
             }
         } finally {
+            if (streamingConnection != null) streamingConnection.close();
+            if (streamingClient != null) streamingClient.shutdown();
             for (Process process : processes) process.destroyForcibly();
             for (Process process : processes) process.waitFor();
         }

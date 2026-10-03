@@ -4,7 +4,10 @@ metadata:
   name: recsys-config
   namespace: recsys
 data:
-  REDIS_HOST: "redis"
+  # No standalone write endpoint in base: static Services cannot follow Sentinel elections.
+  # Empty deliberately fails closed if a workload accidentally selects standalone mode.
+  # ElastiCache overlays replace this with their managed primary endpoint.
+  REDIS_HOST: ""
   REDIS_PORT: "6379"
   REDIS_MODE: "sentinel"
   REDIS_SENTINEL_MASTER: "mymaster"

@@ -11,6 +11,7 @@ data:
     # exits 1 on startup. redis-primary is a Service DNS name with no stable IP to
     # hardcode in its place. Same directive, same reason, as docker/redis/sentinel.conf.
     sentinel resolve-hostnames yes
+    # Bootstrap only. Applications must use Sentinel discovery, not this static Service.
     sentinel monitor mymaster redis-primary 6379 2
     sentinel down-after-milliseconds mymaster 5000
     sentinel failover-timeout mymaster 30000
@@ -88,6 +89,9 @@ spec:
             - "--dir"
             - "/data"
             - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            # A returning primary is demoted by Sentinel and must authenticate to its new primary.
+            - "--masterauth"
             - "$(REDIS_PASSWORD)"
             # ACL users, one per workload — see k8s/base/redis-users.acl.template. Rules are
             # passed as a file rather than as `--user` arguments because a user rule carries its
@@ -186,6 +190,8 @@ kind: Service
 metadata:
   name: redis-primary
   namespace: recsys
+  annotations:
+    recsys.io/endpoint-purpose: "bootstrap-only; not an application write endpoint"
 spec:
   type: ClusterIP
   selector:
@@ -485,27 +491,3 @@ spec:
     - name: sentinel
       port: 26379
       targetPort: 26379
----
-# REDIS_HOST is "redis" in the ConfigMap, but until this Service existed that name resolved to
-# nothing in-cluster. It was inert only because REDIS_MODE is "sentinel", so
-# LettuceClientFactory takes the sentinel path and ignores the standalone host. The EKS
-# overlays set REDIS_SENTINEL_MASTER: "" and rely on REDIS_HOST, so the standalone path IS
-# live in production — and any base-shaped deployment that flips REDIS_MODE would fail on DNS
-# resolution before NetworkPolicy ever entered the picture.
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: recsys
-spec:
-  type: ClusterIP
-  selector:
-    app: redis
-    # Primary only. REDIS_HOST is the standalone path's read-AND-write endpoint, and `app: redis`
-    # alone also matches the two replicas — writes would round-robin onto a read-only replica and
-    # fail intermittently, which is a worse failure than the DNS error this Service replaced.
-    role: primary
-  ports:
-    - name: redis
-      port: 6379
-      targetPort: 6379

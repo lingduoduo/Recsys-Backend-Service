@@ -79,11 +79,14 @@ public final class OnlineFeatureStreamingJob {
         // Default to the same environment variables the services read, so a job submitted into a
         // cluster inherits the credentials without a bespoke configuration path. Never logged.
         RedisEndpoint redis = new RedisEndpoint(
-                params.get("redis.host", "localhost"),
-                params.getInt("redis.port", 6379),
+                params.get("redis.host", System.getenv().getOrDefault("REDIS_HOST", "localhost")),
+                params.getInt("redis.port", Integer.parseInt(System.getenv().getOrDefault("REDIS_PORT", "6379"))),
                 params.get("redis.username", System.getenv("REDIS_USERNAME")),
                 params.get("redis.password", System.getenv("REDIS_PASSWORD")),
-                Boolean.parseBoolean(params.get("redis.tls", System.getenv("REDIS_TLS"))));
+                Boolean.parseBoolean(params.get("redis.tls", System.getenv("REDIS_TLS"))),
+                params.get("redis.mode", System.getenv().getOrDefault("REDIS_MODE", "standalone")),
+                params.get("redis.sentinel-master", System.getenv().getOrDefault("REDIS_SENTINEL_MASTER", "mymaster")),
+                params.get("redis.sentinel-nodes", System.getenv().getOrDefault("REDIS_SENTINEL_NODES", "")));
         int recentMovieLimit = params.getInt("recent-movie-limit", 3);
         int topK = params.getInt("top-k", 10);
         int topKBucketCount = params.getInt("top-k-bucket-count", jobConfiguration.operatorParallelism());
@@ -1031,10 +1034,16 @@ public final class OnlineFeatureStreamingJob {
      * Redis connection settings. Credentials travel to the task managers inside the serialized
      * sink, which is why this is a serializable record rather than a RedisURI (which is not).
      */
-    record RedisEndpoint(String host, int port, String username, String password, boolean tls)
+    record RedisEndpoint(String host, int port, String username, String password, boolean tls,
+                         String mode, String sentinelMaster, String sentinelNodes)
             implements Serializable {
+        RedisEndpoint(String host, int port, String username, String password, boolean tls) {
+            this(host, port, username, password, tls, "standalone", "mymaster", "");
+        }
+
         RedisURI uri() {
-            return StreamingRedisUri.from(host, port, username, password, tls);
+            return StreamingRedisUri.from(host, port, username, password, tls,
+                    mode, sentinelMaster, sentinelNodes);
         }
 
         @Override

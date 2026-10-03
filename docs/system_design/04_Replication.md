@@ -132,8 +132,11 @@ Not everything is replicated, by design:
   `redis-primary` outright and asserts that a replica is promoted, that a
   Sentinel-discovering client can **write** to the promotion (a replica answers `PING` and
   refuses `SET`, so only a write proves it), and that the returning old primary rejoins as
-  a replica without the promotion flipping back. It also reports the Service trap in sharp
-  edge 7 rather than asserting it, since that is documented behaviour, not a regression.
+  a replica without the promotion flipping back. It checks authenticated replication of a
+  post-recovery canary, exactly one primary, and the write endpoint contract in sharp edge 7.
+  Run both `FAILURE_MODE=scale` (a sustained outage, requires promotion) and
+  `FAILURE_MODE=delete` (pod replacement, may recover before an election). Each run uses
+  its own disposable namespace and records Sentinel detection/election events.
 - **Established application connections** — `LettuceSentinelFailoverTest` runs the actual
   `LettuceClientFactory.from` executor against isolated, password-protected Redis processes.
   It warms the shared connection and the dedicated read pool, kills the primary, then
@@ -196,17 +199,32 @@ connection rather than risking a silent replay.
    the old primary returns it is demoted to a replica and the promotion holds. **Sentinel
    failover needs no human intervention and no Service-selector edit.**
 
-   The trap is the Service. `redis-primary` and `redis` both select `role: primary`, a
-   static label on the StatefulSet's pod template that failover does not move. After
-   recovery they resolve to the *demoted replica*: `PING` returns `PONG`, reads return
-   correct data, and **every write fails with `-READONLY`, indefinitely**, while both
-   `redis-cli ping` probes stay green. Anything on `REDIS_HOST` rather than Sentinel
-   discovery is silently read-only until someone intervenes. This is why `k8s/base` sets
-   `REDIS_MODE=sentinel`; `REDIS_HOST: "redis"` is a correct address only while no failover
-   has occurred.
+   **Write endpoint contract (issue #349):** base workloads use Sentinel discovery only.
+   `REDIS_HOST` is deliberately empty, and the static `redis` Service has been removed.
+   `redis-primary` remains **bootstrap-only**, marked by a Service annotation: Sentinel
+   monitors its stable VIP, and replicas use it for initial replication. It is not an
+   application write endpoint. After failover it still selects the original pod, which
+   becomes a replica; `PING` succeeds but `SET` returns `READONLY`. The retained name and
+   VIP preserve existing Sentinel state and replica startup dependencies.
+
+   Flink and Spark now snapshot `REDIS_MODE`, `REDIS_SENTINEL_MASTER`, and
+   `REDIS_SENTINEL_NODES` with their connection settings on the driver and serialize those
+   settings to workers. Explicit job arguments can override them. Configure Sentinel mode
+   for in-cluster writes; standalone mode remains available for local demos and ElastiCache.
+   EKS overlays supply their managed primary endpoint and continue using standalone mode.
+   The primary StatefulSet also sets `masterauth`, so a returning, demoted primary can
+   authenticate its replication connection instead of serving stale data.
+
+   **Upgrade existing base deployments:** apply the manifests, restart application pods
+   that consume the ConfigMap through environment variables, and resubmit Flink/Spark jobs
+   with Sentinel settings. Then remove the obsolete alias with
+   `kubectl -n recsys delete service redis --ignore-not-found` (ordinary `kubectl apply -k`
+   does not prune removed resources). Do not remove `redis-primary` or relabel StatefulSet
+   ownership labels. Jobs using explicit standalone settings must switch to discovery
+   before the alias is removed. Do not make this change to ElastiCache's managed endpoint.
 
    One operational artefact worth knowing: on `+switch-master` Sentinel adds the demoted
-   master to its replica list — and that "master" is a ClusterIP, so the stack accumulates
-   a permanently-dead slave entry. Measured: a cluster that had already failed over once
+   master to its replica list — and that "master" is a ClusterIP. During the original
+   investigation the stack accumulated a dead slave entry. Measured: a cluster that had already failed over once
    took *minutes* to elect on the next attempt, against under a second from clean. Sentinel
    state is not free of history; a failover drill should start from a fresh namespace.

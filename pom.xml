@@ -424,6 +424,7 @@
                      same credentials LettuceClientFactory.standaloneUri builds for every service,
                      or a job and a service authenticate differently against the same server. -->
                 <include>**/redis/StreamingRedisUriTest.java</include>
+                <include>**/k8s/RedisWriteDiscoveryManifestTest.java</include>
                 <include>**/redis/RedisEmbeddingStoreTest.java</include>
                 <include>**/redis/RedisEvictionPolicyManifestTest.java</include>
                 <!-- The recall channel timeout bounds the caller; the Redis command timeout

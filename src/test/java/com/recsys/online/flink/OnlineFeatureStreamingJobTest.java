@@ -44,6 +44,24 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class OnlineFeatureStreamingJobTest {
 
     @Test
+    void sentinelEndpointSurvivesSerializationToTaskManagers() throws Exception {
+        var endpoint = new OnlineFeatureStreamingJob.RedisEndpoint("", 6379, "streaming", "secret", false,
+                "sentinel", "mymaster", "sentinel-a:26379,sentinel-b:26380");
+        var bytes = new java.io.ByteArrayOutputStream();
+        try (var output = new java.io.ObjectOutputStream(bytes)) { output.writeObject(endpoint); }
+        OnlineFeatureStreamingJob.RedisEndpoint restored;
+        try (var input = new java.io.ObjectInputStream(new java.io.ByteArrayInputStream(bytes.toByteArray()))) {
+            restored = (OnlineFeatureStreamingJob.RedisEndpoint) input.readObject();
+        }
+        assertThat(restored.uri().getSentinelMasterId()).isEqualTo("mymaster");
+        assertThat(restored.uri().getSentinels()).hasSize(2);
+        assertThat(restored.uri().getUsername()).isEqualTo("streaming");
+        assertThat(restored.uri().getPassword()).containsExactly("secret".toCharArray());
+        assertThat(restored.toString()).doesNotContain("secret");
+    }
+
+
+    @Test
     void assignsMovieBucketsStablyIncludingNegativeIds() {
         assertThat(OnlineFeatureStreamingJob.movieBucket(42, 7)).isEqualTo(0);
         assertThat(OnlineFeatureStreamingJob.movieBucket(-42, 7)).isEqualTo(0);

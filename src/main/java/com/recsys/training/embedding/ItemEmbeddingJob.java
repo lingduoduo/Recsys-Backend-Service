@@ -174,12 +174,15 @@ public class ItemEmbeddingJob {
         final String username = config.redisUsername();
         final String password = config.redisPassword();
         final boolean tls = config.redisTls();
+        final String mode = config.redisMode();
+        final String sentinelMaster = config.redisSentinelMaster();
+        final String sentinelNodes = config.redisSentinelNodes();
 
         itemEmbeddings.foreachPartition(rows -> {
             // Create the Lettuce client inside the partition lambda so nothing
             // non-serializable crosses the Spark closure boundary.
             RedisClient client = RedisClient.create(
-                    StreamingRedisUri.from(host, port, username, password, tls));
+                    StreamingRedisUri.from(host, port, username, password, tls, mode, sentinelMaster, sentinelNodes));
             try (StatefulRedisConnection<String, String> conn = client.connect(StringCodec.UTF8)) {
                 conn.setAutoFlushCommands(false);
                 RedisAsyncCommands<String, String> async = conn.async();
@@ -225,6 +228,9 @@ public class ItemEmbeddingJob {
             String redisUsername,
             String redisPassword,
             boolean redisTls,
+            String redisMode,
+            String redisSentinelMaster,
+            String redisSentinelNodes,
             String redisKeyPrefix,
             long redisTtl,
             String synonymMovieId,
@@ -242,8 +248,11 @@ public class ItemEmbeddingJob {
             double stepSize = 0.025;
             double minRating = 3.5;
             boolean saveToRedis = false;
-            String redisHost = "localhost";
-            int redisPort = 6379;
+            String redisHost = System.getenv().getOrDefault("REDIS_HOST", "localhost");
+            int redisPort = Integer.parseInt(System.getenv().getOrDefault("REDIS_PORT", "6379"));
+            String redisMode = System.getenv().getOrDefault("REDIS_MODE", "standalone");
+            String redisSentinelMaster = System.getenv().getOrDefault("REDIS_SENTINEL_MASTER", "mymaster");
+            String redisSentinelNodes = System.getenv().getOrDefault("REDIS_SENTINEL_NODES", "");
             // Default to the environment so a submitted job inherits the same credentials a
             // service reads, and so no password has to appear on the spark-submit command line.
             String redisUsername = System.getenv("REDIS_USERNAME");
@@ -273,6 +282,9 @@ public class ItemEmbeddingJob {
                     case "step-size"        -> stepSize = Double.parseDouble(value);
                     case "min-rating"       -> minRating = Double.parseDouble(value);
                     case "save-to-redis"    -> saveToRedis = Boolean.parseBoolean(value);
+                    case "redis-mode"       -> redisMode = value;
+                    case "redis-sentinel-master" -> redisSentinelMaster = value;
+                    case "redis-sentinel-nodes" -> redisSentinelNodes = value;
                     case "redis-host"       -> redisHost = value;
                     case "redis-port"       -> redisPort = Integer.parseInt(value);
                     case "redis-username"   -> redisUsername = value;
@@ -291,6 +303,7 @@ public class ItemEmbeddingJob {
                     ratingsPath, outputPath, master,
                     vectorSize, windowSize, minCount, maxIter, stepSize, minRating,
                     saveToRedis, redisHost, redisPort, redisUsername, redisPassword, redisTls,
+                    redisMode, redisSentinelMaster, redisSentinelNodes,
                     redisKeyPrefix, redisTtl,
                     synonymMovieId, synonymCount, lshAnalysis
             );

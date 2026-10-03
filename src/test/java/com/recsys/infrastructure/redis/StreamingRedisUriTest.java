@@ -42,6 +42,28 @@ class StreamingRedisUriTest {
     }
 
     @Test
+    void sentinelSettingsDiscoverInsteadOfUsingTheStandaloneHost() {
+        RedisURI uri = StreamingRedisUri.from("stale-host", 6379, "streaming", "secret", false,
+                "sentinel", "mymaster", "sentinel-a:26379,sentinel-b:26380");
+        assertEquals("mymaster", uri.getSentinelMasterId());
+        assertEquals(2, uri.getSentinels().size());
+        assertEquals("sentinel-a", uri.getSentinels().get(0).getHost());
+        assertEquals(26380, uri.getSentinels().get(1).getPort());
+        assertEquals("streaming", uri.getUsername());
+        assertArrayEquals("secret".toCharArray(), uri.getPassword());
+    }
+
+    @Test
+    void sentinelModeRejectsMissingDiscoveryAndUnknownModes() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> StreamingRedisUri.from("stale-host", 6379, "", "secret", false,
+                        "sentinel", "mymaster", ""));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> StreamingRedisUri.from("stale-host", 6379, "", "secret", false,
+                        "typo", "mymaster", "sentinel:26379"));
+    }
+
+    @Test
     void anonymousWhenBothBlank() {
         RedisURI expected = LettuceClientFactory.standaloneUri(HOST, PORT, "", "", false,
                 LettuceClientFactory.DEFAULT_TIMEOUT_MS);

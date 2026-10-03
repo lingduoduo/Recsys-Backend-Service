@@ -134,6 +134,17 @@ Not everything is replicated, by design:
   refuses `SET`, so only a write proves it), and that the returning old primary rejoins as
   a replica without the promotion flipping back. It also reports the Service trap in sharp
   edge 7 rather than asserting it, since that is documented behaviour, not a regression.
+- **Established application connections** — `LettuceSentinelFailoverTest` runs the actual
+  `LettuceClientFactory.from` executor against isolated, password-protected Redis processes.
+  It warms the shared connection and the dedicated read pool, kills the primary, then
+  asserts that the same executor writes to the promoted replica and reads through its
+  existing pool. It restarts the original primary and checks demotion and replication.
+  Run with `redis-server` on PATH:
+  `mvn -Dtest=LettuceSentinelFailoverTest -Dredis.failover.test=true test`.
+  This is opt-in to keep ordinary builds independent of a local Redis installation.
+  It verifies Java connection recovery; it does not verify Kubernetes networking, the
+  Service VIP, or the separate Spring Data connection factory. The Kubernetes harness
+  above covers discovery and routing with `redis-cli`.
 
 **Replica fallback is stable, not random.** When no same-AZ replica exists, `readable()`
 returns the *first configured* replica, deliberately: `readable()` and `probeReadable()`

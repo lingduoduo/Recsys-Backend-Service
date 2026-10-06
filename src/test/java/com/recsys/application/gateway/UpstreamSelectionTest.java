@@ -237,4 +237,23 @@ class UpstreamSelectionTest {
                 .isGreaterThanOrEqualTo(probesBefore + 3);
         assertThat(burst(client, 4)).as("still selectable after failing health checks").isZero();
     }
+
+    @Test
+    void healthProbesRotateAcrossPodsToo() throws Exception {
+        // The health checker must use the recycling factory as well; on Armeria's default factory its
+        // probes would ride one pinned connection and only ever see one pod. No data traffic is sent,
+        // so only probe connections can rotate here.
+        List<Pod> pods = pods(4);
+        PerConnectionProxy proxy = new PerConnectionProxy(pods);
+        resources.add(proxy);
+        client(proxy.port(), new UpstreamEndpointGroups.UpstreamClientConfig(true, 200, 1000));
+
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (pods.stream().filter(p -> p.probes.get() > 0).count() < pods.size() && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
+
+        assertThat(pods.stream().filter(p -> p.probes.get() > 0).count()).as("pods that received probes")
+                .isEqualTo(pods.size());
+    }
 }

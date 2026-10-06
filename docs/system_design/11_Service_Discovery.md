@@ -16,7 +16,7 @@ each answering a different question:
 |---|---|---|
 | Route table / registry | **Which address?** (`host:port`) | Static route address; optionally overridden by the registry |
 | Cloud Map DNS | **Which IP?** for that host | Armeria resolves per-connection under a 30 s DNS TTL |
-| Health-checked endpoint group | **Is it selectable?** | A down upstream is dropped → request fast-fails `503` |
+| Health-checked endpoint group | **Is it selectable?** | A never-ready upstream stays out → `503` within the selection timeout (initial readiness only) |
 
 The registry decides the *address*, DNS decides the *IP*, and the health check
 decides *selectability* — and each is independently optional/fail-safe. Addressing
@@ -126,8 +126,8 @@ prove it's alive:
   (deduped, so pollers scale with backends not routes). With
   `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED` (default true,
   `GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS` default 10000) each backend is probed, and
-  one that has never answered healthy stays out of selection, so a request to it
-  **fast-fails `503`** instead of hanging. With `allowEmptyEndpoints(false)` this gates
+  one that has never answered healthy stays out of selection, so a request to it is
+  answered `503` once the selection timeout (set to `GATEWAY_TIMEOUT_MS`) expires. With `allowEmptyEndpoints(false)` this gates
   **initial readiness only**: Armeria ignores an update that would empty the group,
   so a backend that was ready once is never dropped — per-pod health is the readiness
   probe's job (see [Load Balancing](01_Load_Balancing.md#connection-pinning-and-recycling)). This is the
@@ -192,8 +192,8 @@ the last-good view.
   static when unregistered).
 - **Endpoint groups / health** — `UpstreamEndpointGroupsTest` (dedupe by
   host/port/health-path; a client per route even with health-check off),
-  `GatewayUpstreamHealthCheckIntegrationTest` (healthy upstream forwarded; unhealthy
-  dropped and fast-fails `503`).
+  `GatewayUpstreamHealthCheckIntegrationTest` (healthy upstream forwarded; never-healthy
+  upstream answered `503` within the selection timeout).
 - **Observability** — `GatewayHealthServiceRegistryTest` (registry section present
   only with a provider), `GatewayRegistryMetricsTest` (all five meters; age is `-1`
   before the first refresh).

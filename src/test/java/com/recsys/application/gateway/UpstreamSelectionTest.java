@@ -216,4 +216,25 @@ class UpstreamSelectionTest {
 
         assertThat(podsServing(pods)).as("pods that received requests").isEqualTo(1);
     }
+
+    @Test
+    void healthCheckGatesOnlyInitialReadiness() throws Exception {
+        // Deliberate: after first readiness the one-endpoint group never empties, because with
+        // connections rotating each probe lands on a random pod and one bad pod would 503 the whole
+        // backend. Per-pod health is the readiness probe's job. Changing this must be a decision.
+        Pod pod = pods(1).get(0);
+        WebClient client = client(pod.port(), new UpstreamEndpointGroups.UpstreamClientConfig(true, 200, 0));
+        assertThat(burst(client, 4)).isZero();
+
+        pod.healthy.set(false);
+        int probesBefore = pod.probes.get();
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (pod.probes.get() < probesBefore + 3 && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
+
+        assertThat(pod.probes.get()).as("the checker kept probing and saw 503s")
+                .isGreaterThanOrEqualTo(probesBefore + 3);
+        assertThat(burst(client, 4)).as("still selectable after failing health checks").isZero();
+    }
 }

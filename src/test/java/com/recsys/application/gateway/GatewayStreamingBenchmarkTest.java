@@ -45,7 +45,7 @@ class GatewayStreamingBenchmarkTest {
                 "recsys-catalog-serving");
         try (GatewayRequestForwarder forwarder = new GatewayRequestForwarder(List.of(route),
                 Duration.ofSeconds(10), Map.of(), GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 1000))) {
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 1000))) {
             GatewayProxyService proxy = new GatewayProxyService(List.of(route), forwarder,
                     GatewayAuthenticator.disabled());
             Server gateway = Server.builder().http(0).service("prefix:/", (ctx, req) -> {

@@ -30,7 +30,7 @@ class GatewayResponseStreamingTest {
                 "recsys-catalog-serving");
         try (GatewayRequestForwarder forwarder = new GatewayRequestForwarder(List.of(route),
                 Duration.ofSeconds(10), Map.of(), GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 1000))) {
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 1000))) {
             HttpRequest req = HttpRequest.of(HttpMethod.GET, "/api/catalog/item");
             HttpResponse response = forwarder.forward(ServiceRequestContext.of(req),
                     AggregatedHttpRequest.of(HttpMethod.GET, "/api/catalog/item"), route,
@@ -76,7 +76,7 @@ class GatewayResponseStreamingTest {
                 "recsys-catalog-serving");
         try (GatewayRequestForwarder forwarder = new GatewayRequestForwarder(List.of(route),
                 Duration.ofSeconds(10), Map.of(), GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 1000))) {
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 1000))) {
             ApiDeprecationDecorator deprecation = ApiDeprecationDecorator.fromEnvironment(
                     name -> "GATEWAY_DEPRECATION_SUNSET".equals(name) ? "2027-07-27" : null);
             assertTrue(deprecation.isEnabled(), "deprecation decorator must be in the stack");

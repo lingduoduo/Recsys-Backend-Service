@@ -6,8 +6,10 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class UpstreamEndpointGroupsTest {
 
@@ -16,8 +18,8 @@ class UpstreamEndpointGroupsTest {
                 URI.create(baseUri), healthPath);
     }
 
-    private static UpstreamEndpointGroups.HealthCheckConfig cfg(boolean enabled) {
-        return new UpstreamEndpointGroups.HealthCheckConfig(enabled, 10_000L);
+    private static UpstreamEndpointGroups.UpstreamClientConfig cfg(boolean enabled) {
+        return new UpstreamEndpointGroups.UpstreamClientConfig(enabled, 10_000L);
     }
 
     @Test
@@ -62,5 +64,36 @@ class UpstreamEndpointGroupsTest {
                 routes, Duration.ofSeconds(3), null, cfg(false));
         groups.close();
         groups.close(); // must not throw
+    }
+
+    @Test
+    void maxConnectionAgeDefaultsTo30sWhenUnset() {
+        assertThat(UpstreamEndpointGroups.UpstreamClientConfig.fromEnvironment(name -> null).maxConnectionAgeMs())
+                .isEqualTo(30_000L);
+        assertThat(new UpstreamEndpointGroups.UpstreamClientConfig(true, 10_000L).maxConnectionAgeMs())
+                .isEqualTo(UpstreamEndpointGroups.UpstreamClientConfig.DEFAULT_MAX_CONNECTION_AGE_MS);
+    }
+
+    @Test
+    void maxConnectionAgeIsReadFromTheEnvironment() {
+        Map<String, String> env = Map.of("GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS", "0");
+        assertThat(UpstreamEndpointGroups.UpstreamClientConfig.fromEnvironment(env::get).maxConnectionAgeMs())
+                .isZero();
+    }
+
+    @Test
+    void maxConnectionAgeAcceptsZeroAndAtLeastOneSecond() {
+        assertThat(new UpstreamEndpointGroups.UpstreamClientConfig(true, 1000, 0).maxConnectionAgeMs()).isZero();
+        assertThat(new UpstreamEndpointGroups.UpstreamClientConfig(true, 1000, 1000).maxConnectionAgeMs())
+                .isEqualTo(1000);
+    }
+
+    @Test
+    void maxConnectionAgeRejectsNegativeAndSubSecondValues() {
+        for (long bad : new long[]{-1, 1, 999}) {
+            assertThatThrownBy(() -> new UpstreamEndpointGroups.UpstreamClientConfig(true, 1000, bad))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS");
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.recsys.application.gateway;
 
 import com.recsys.config.EnvVars;
 
+import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.Endpoint;
 import com.linecorp.armeria.client.HttpClient;
 import com.linecorp.armeria.client.WebClient;
@@ -37,11 +38,45 @@ import java.util.function.Function;
  */
 final class UpstreamEndpointGroups implements java.io.Closeable {
 
-    record HealthCheckConfig(boolean healthCheckEnabled, long healthCheckIntervalMs) {
-        static HealthCheckConfig fromEnvironment() {
-            boolean enabled = EnvVars.readBool("GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED", true);
-            long intervalMs = EnvVars.readLong("GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS", 10_000L);
-            return new HealthCheckConfig(enabled, intervalMs);
+    /**
+     * How the gateway's upstream clients behave. {@code maxConnectionAgeMs} recycles each upstream
+     * connection after that age so kube-proxy re-picks a backend pod: without it, Armeria multiplexes
+     * every request to a backend onto one long-lived HTTP/2 connection, pinning a gateway pod to one
+     * backend pod indefinitely. {@code 0} disables recycling.
+     */
+    record UpstreamClientConfig(boolean healthCheckEnabled, long healthCheckIntervalMs, long maxConnectionAgeMs) {
+
+        static final long DEFAULT_MAX_CONNECTION_AGE_MS = 30_000L;
+        // Armeria rejects a non-zero max connection age below this.
+        private static final long MIN_MAX_CONNECTION_AGE_MS = 1_000L;
+
+        UpstreamClientConfig {
+            if (maxConnectionAgeMs < 0
+                    || (maxConnectionAgeMs > 0 && maxConnectionAgeMs < MIN_MAX_CONNECTION_AGE_MS)) {
+                throw new IllegalArgumentException("GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS must be 0 (disabled) or >= "
+                        + MIN_MAX_CONNECTION_AGE_MS + ", was " + maxConnectionAgeMs);
+            }
+        }
+
+        UpstreamClientConfig(boolean healthCheckEnabled, long healthCheckIntervalMs) {
+            this(healthCheckEnabled, healthCheckIntervalMs, DEFAULT_MAX_CONNECTION_AGE_MS);
+        }
+
+        static UpstreamClientConfig fromEnvironment() {
+            return fromEnvironment(System::getenv);
+        }
+
+        static UpstreamClientConfig fromEnvironment(EnvVars.EnvReader env) {
+            boolean enabled = EnvVars.readBool(env, "GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED", true);
+            long intervalMs = EnvVars.readLong(env, "GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS", 10_000L);
+            long maxAgeMs = EnvVars.readLong(env, "GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS",
+                    DEFAULT_MAX_CONNECTION_AGE_MS);
+            return new UpstreamClientConfig(enabled, intervalMs, maxAgeMs);
+        }
+
+        /** A new factory for the upstream clients and health checkers; the caller owns and closes it. */
+        ClientFactory newClientFactory() {
+            return ClientFactory.builder().maxConnectionAgeMillis(maxConnectionAgeMs).build();
         }
     }
 
@@ -57,7 +92,7 @@ final class UpstreamEndpointGroups implements java.io.Closeable {
     static UpstreamEndpointGroups create(List<MicroserviceRoute> routes,
                                          Duration responseTimeout,
                                          Function<? super HttpClient, ? extends HttpClient> decorator,
-                                         HealthCheckConfig config) {
+                                         UpstreamClientConfig config) {
         Map<String, EndpointGroup> groupsByKey = new LinkedHashMap<>();
         List<EndpointGroup> owned = new ArrayList<>();
         Map<String, WebClient> clients = new HashMap<>();
@@ -112,7 +147,7 @@ final class UpstreamEndpointGroups implements java.io.Closeable {
 
     private static EndpointGroup buildGroup(SessionProtocol protocol, String host, int port,
                                             String healthPath, Duration responseTimeout,
-                                            HealthCheckConfig config) {
+                                            UpstreamClientConfig config) {
         // Static endpoint — Armeria's default per-connection resolver handles the host (literal IPs,
         // localhost, and DNS names alike), identical to the previous plain-WebClient behavior.
         Endpoint endpoint = Endpoint.of(host, port);

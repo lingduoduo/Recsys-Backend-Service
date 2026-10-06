@@ -60,7 +60,7 @@ class GatewayUpstreamHealthCheckIntegrationTest {
         // Short probe interval; health checking enabled.
         return new GatewayRequestForwarder(
                 List.of(catalogRoute(port)), Duration.ofSeconds(2), cbs, GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(true, 200L));
+                new UpstreamEndpointGroups.UpstreamClientConfig(true, 200L));
     }
 
     private static HttpStatus proxyOnce(GatewayRequestForwarder fwd, int port) {

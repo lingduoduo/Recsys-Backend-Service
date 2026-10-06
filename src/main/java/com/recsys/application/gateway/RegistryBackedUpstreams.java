@@ -25,7 +25,7 @@ final class RegistryBackedUpstreams implements java.io.Closeable {
     private final List<MicroserviceRoute> routes;
     private final Duration timeout;
     private final Function<? super HttpClient, ? extends HttpClient> decorator;
-    private final UpstreamEndpointGroups.HealthCheckConfig healthConfig;
+    private final UpstreamEndpointGroups.UpstreamClientConfig healthConfig;
     private final ServiceRegistryProvider provider;
 
     private volatile Map<String, String> resolvedAddresses;   // routeName -> effective base URI
@@ -35,7 +35,7 @@ final class RegistryBackedUpstreams implements java.io.Closeable {
     RegistryBackedUpstreams(List<MicroserviceRoute> routes,
                             Duration timeout,
                             Function<? super HttpClient, ? extends HttpClient> decorator,
-                            UpstreamEndpointGroups.HealthCheckConfig healthConfig,
+                            UpstreamEndpointGroups.UpstreamClientConfig healthConfig,
                             ServiceRegistryProvider provider) {
         this.routes = List.copyOf(routes);
         this.timeout = timeout;

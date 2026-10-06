@@ -156,7 +156,7 @@ class GatewayPathCanonicalizationTest {
                 List.of(MODEL),
                 new GatewayRequestForwarder(List.of(MODEL), Duration.ofSeconds(1), Map.of(),
                         GatewayRateLimiter.disabled(),
-                        new UpstreamEndpointGroups.HealthCheckConfig(false, 0L)),
+                        new UpstreamEndpointGroups.UpstreamClientConfig(false, 0L)),
                 GatewayAuthenticator.disabled());
         HttpRequest request = HttpRequest.of(
                 RequestHeaders.of(HttpMethod.POST, path), HttpData.ofUtf8("{\"userId\":\"999\"}"));

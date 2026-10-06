@@ -95,7 +95,7 @@ pod from the Service's endpoints. So:
 
 ## Testing
 
-- **`UpstreamConnectionRecyclingTest`** (new, non-docker, added to `-Presilience` with a
+- **`UpstreamSelectionTest`** (new, non-docker, added to `-Presilience` with a
   comment): a per-connection round-robin TCP proxy in front of four Armeria backends.
   - with max age 1000 ms, every backend receives requests within a bounded poll window;
   - with age 0 (disabled), every request lands on one backend — this is the bug, asserted

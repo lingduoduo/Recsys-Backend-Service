@@ -204,7 +204,7 @@ class UserScopeAuthorizationTest {
     /**
      * Health checking is off: this test never intends a network call, and probing the two dead
      * localhost upstreams costs ~12 s of connection-refused retries per run. Reaching the
-     * package-private constructor that accepts a {@link UpstreamEndpointGroups.HealthCheckConfig}
+     * package-private constructor that accepts a {@link UpstreamEndpointGroups.UpstreamClientConfig}
      * is possible only because this test lives in {@code com.recsys.application.gateway}.
      */
     private static GatewayRequestForwarder forwarder(io.micrometer.core.instrument.MeterRegistry registry,
@@ -212,7 +212,7 @@ class UserScopeAuthorizationTest {
         return new GatewayRequestForwarder(
                 List.of(CATALOG, MODEL, LLM), Duration.ofSeconds(1), circuitBreakers,
                 GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 0L), registry);
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 0L), registry);
     }
 
     /** Keeps the status assertion in one place; the body must never echo the requested id. */

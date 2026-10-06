@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Exercises the health-checked endpoint-group wiring end-to-end through {@link GatewayRequestForwarder}:
  * a healthy upstream is selected and forwarded to, while an upstream whose health check never passes is
- * dropped from selection so the gateway fast-fails with 503 instead of hanging until the response timeout.
+ * never added to selection so the gateway fast-fails with 503 instead of hanging until the response timeout.
  * The live-flip <em>detection latency</em> is Armeria's concern (≈ the health-check retry interval) and is
  * intentionally not timed here; these assertions are deterministic.
  */
@@ -60,7 +60,7 @@ class GatewayUpstreamHealthCheckIntegrationTest {
         // Short probe interval; health checking enabled.
         return new GatewayRequestForwarder(
                 List.of(catalogRoute(port)), Duration.ofSeconds(2), cbs, GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(true, 200L));
+                new UpstreamEndpointGroups.UpstreamClientConfig(true, 200L));
     }
 
     private static HttpStatus proxyOnce(GatewayRequestForwarder fwd, int port) {

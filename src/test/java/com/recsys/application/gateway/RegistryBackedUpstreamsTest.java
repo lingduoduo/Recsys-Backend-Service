@@ -21,8 +21,8 @@ class RegistryBackedUpstreamsTest {
                 URI.create("http://static-host:6010"), "/health", "recsys-catalog-serving");
     }
 
-    private static UpstreamEndpointGroups.HealthCheckConfig noProbe() {
-        return new UpstreamEndpointGroups.HealthCheckConfig(false, 10_000L);
+    private static UpstreamEndpointGroups.UpstreamClientConfig noProbe() {
+        return new UpstreamEndpointGroups.UpstreamClientConfig(false, 10_000L);
     }
 
     private static ServiceRegistryProvider providerReturning(Map<String, String> map) {

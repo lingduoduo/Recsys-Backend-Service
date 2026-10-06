@@ -5,6 +5,7 @@ import com.recsys.ratelimit.GatewayRateLimiter;
 import com.recsys.ratelimit.TokenBucket;
 import com.recsys.resilience.RouteCircuitBreaker;
 
+import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.WebClient;
 import com.linecorp.armeria.client.retry.Backoff;
 import com.linecorp.armeria.client.retry.RetryRule;
@@ -50,6 +51,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
             Set.of("authorization", "x-api-key", GatewayOriginSecret.HEADER);
 
     private final UpstreamEndpointGroups staticUpstreams;     // non-null when registry disabled
+    private final ClientFactory upstreamClientFactory;        // owned; non-null when registry disabled
     private final RegistryBackedUpstreams registryUpstreams;  // non-null when registry enabled
     private final Map<String, RouteCircuitBreaker> circuitBreakers;
     private final GatewayRateLimiter rateLimiter;
@@ -72,7 +74,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
                                    GatewayRateLimiter rateLimiter,
                                    MeterRegistry registry) {
         this(routes, timeout, circuitBreakers, rateLimiter,
-                UpstreamEndpointGroups.HealthCheckConfig.fromEnvironment(), registry);
+                UpstreamEndpointGroups.UpstreamClientConfig.fromEnvironment(), registry);
     }
 
     /**
@@ -87,7 +89,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
                                    MeterRegistry registry,
                                    AdminTokenGuard operatorGuard) {
         this(routes, timeout, circuitBreakers, rateLimiter,
-                UpstreamEndpointGroups.HealthCheckConfig.fromEnvironment(), registry, operatorGuard);
+                UpstreamEndpointGroups.UpstreamClientConfig.fromEnvironment(), registry, operatorGuard);
     }
 
     // Package-private: lets tests inject an explicit health-check config (e.g. a short probe interval).
@@ -95,7 +97,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
                             Duration timeout,
                             Map<String, RouteCircuitBreaker> circuitBreakers,
                             GatewayRateLimiter rateLimiter,
-                            UpstreamEndpointGroups.HealthCheckConfig healthConfig) {
+                            UpstreamEndpointGroups.UpstreamClientConfig healthConfig) {
         this(routes, timeout, circuitBreakers, rateLimiter, healthConfig, null);
     }
 
@@ -103,7 +105,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
                             Duration timeout,
                             Map<String, RouteCircuitBreaker> circuitBreakers,
                             GatewayRateLimiter rateLimiter,
-                            UpstreamEndpointGroups.HealthCheckConfig healthConfig,
+                            UpstreamEndpointGroups.UpstreamClientConfig healthConfig,
                             MeterRegistry registry) {
         this(routes, timeout, circuitBreakers, rateLimiter, healthConfig, registry, null);
     }
@@ -113,12 +115,14 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
                             Duration timeout,
                             Map<String, RouteCircuitBreaker> circuitBreakers,
                             GatewayRateLimiter rateLimiter,
-                            UpstreamEndpointGroups.HealthCheckConfig healthConfig,
+                            UpstreamEndpointGroups.UpstreamClientConfig healthConfig,
                             MeterRegistry registry,
                             AdminTokenGuard operatorGuard) {
         this.circuitBreakers = Map.copyOf(circuitBreakers);
         this.rateLimiter = rateLimiter == null ? GatewayRateLimiter.disabled() : rateLimiter;
-        this.staticUpstreams = UpstreamEndpointGroups.create(routes, timeout, retryDecorator(), healthConfig);
+        this.upstreamClientFactory = healthConfig.newClientFactory();
+        this.staticUpstreams = UpstreamEndpointGroups.create(routes, timeout, retryDecorator(), healthConfig,
+                upstreamClientFactory);
         this.registryUpstreams = null;
         this.userScopeRejected = counter(registry);
         this.circuitMetrics = GatewayCircuitMetrics.create(registry);
@@ -135,6 +139,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
         this.circuitBreakers = Map.copyOf(circuitBreakers);
         this.rateLimiter = rateLimiter == null ? GatewayRateLimiter.disabled() : rateLimiter;
         this.staticUpstreams = null;
+        this.upstreamClientFactory = null;
         this.registryUpstreams = registryUpstreams;
         this.userScopeRejected = counter(registry);
         this.circuitMetrics = GatewayCircuitMetrics.create(registry);
@@ -156,7 +161,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
             AdminTokenGuard operatorGuard) {
         RegistryBackedUpstreams upstreams = new RegistryBackedUpstreams(
                 routes, timeout, retryDecorator(),
-                UpstreamEndpointGroups.HealthCheckConfig.fromEnvironment(), provider);
+                UpstreamEndpointGroups.UpstreamClientConfig.fromEnvironment(), provider);
         return new GatewayRequestForwarder(circuitBreakers, rateLimiter, upstreams, registry, operatorGuard);
     }
 
@@ -203,6 +208,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
             registryUpstreams.close();
         } else {
             staticUpstreams.close();
+            upstreamClientFactory.close();
         }
     }
 

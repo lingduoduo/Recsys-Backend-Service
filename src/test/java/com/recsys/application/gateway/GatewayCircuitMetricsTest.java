@@ -222,7 +222,7 @@ class GatewayCircuitMetricsTest {
         try (GatewayRequestForwarder forwarder = new GatewayRequestForwarder(List.of(route),
                 Duration.ofSeconds(10), Map.of("catalog", new RouteCircuitBreaker(5, 10000)),
                 GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 1000), registry)) {
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 1000), registry)) {
             Server gateway = Server.builder().http(0)
                     .service("/metrics", PrometheusExpositionService.of(registry.getPrometheusRegistry()))
                     .service("prefix:/", new GatewayProxyService(List.of(route), forwarder,

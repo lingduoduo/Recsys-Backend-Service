@@ -248,11 +248,15 @@ When personalization is unavailable the path still returns something useful:
 By default the gateway data path wraps every upstream in a health-checked
 Armeria endpoint group
 ([`UpstreamEndpointGroups`](../../src/main/java/com/recsys/application/gateway/UpstreamEndpointGroups.java)):
-each backend is probed on an interval and a down backend is dropped from
-selection, so a request to a dead upstream **fast-fails with `503`** instead of
-hanging until the timeout. `allowEmptyEndpoints(false)` means an all-unhealthy
-group fails selection immediately (`EmptyEndpointGroupException` →
-`GatewayRequestForwarder.isNoHealthyEndpoint` → `503`). A single IOException is
+each backend is probed on an interval, and a backend that has never answered
+healthy is kept out of selection, so a request to it **fast-fails with `503`**
+instead of hanging until the timeout (`EmptyEndpointGroupException` →
+`GatewayRequestForwarder.isNoHealthyEndpoint` → `503`). This gates **initial
+readiness only**: `allowEmptyEndpoints(false)` makes Armeria ignore an update that
+would empty the group, so a backend that goes unhealthy after it was ready stays
+selectable (measured 2026-10-06). That is deliberate — the endpoint is a Service
+address, so per-pod health belongs to the readiness probe; see
+[Load Balancing](01_Load_Balancing.md#connection-pinning-and-recycling). A single IOException is
 retried once after 50 ms (max 2 attempts, never on socket timeout). Host
 resolution and the 30 s Cloud Map DNS cache are unchanged.
 

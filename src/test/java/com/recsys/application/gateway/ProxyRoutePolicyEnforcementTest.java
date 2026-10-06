@@ -167,7 +167,7 @@ class ProxyRoutePolicyEnforcementTest {
         return new GatewayRequestForwarder(
                 List.of(CATALOG, MODEL, LLM), Duration.ofSeconds(1), Map.of(),
                 GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 0L), null, guard);
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 0L), null, guard);
     }
 
     private static void assertDenied404(HttpResponse response) {
@@ -196,6 +196,6 @@ class ProxyRoutePolicyEnforcementTest {
         return new GatewayRequestForwarder(
                 List.of(CATALOG, MODEL, LLM), Duration.ofSeconds(1), Map.of(),
                 GatewayRateLimiter.disabled(),
-                new UpstreamEndpointGroups.HealthCheckConfig(false, 0L), null);
+                new UpstreamEndpointGroups.UpstreamClientConfig(false, 0L), null);
     }
 }

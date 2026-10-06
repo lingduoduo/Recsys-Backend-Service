@@ -125,9 +125,12 @@ prove it's alive:
   builds one Armeria `EndpointGroup` per unique `(protocol, host, port, healthPath)`
   (deduped, so pollers scale with backends not routes). With
   `GATEWAY_UPSTREAM_HEALTHCHECK_ENABLED` (default true,
-  `GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS` default 10000) each backend is probed and
-  a down one is dropped from selection with `allowEmptyEndpoints(false)`, so a
-  request to a dead upstream **fast-fails `503`** instead of hanging. This is the
+  `GATEWAY_UPSTREAM_HEALTHCHECK_INTERVAL_MS` default 10000) each backend is probed, and
+  one that has never answered healthy stays out of selection, so a request to it
+  **fast-fails `503`** instead of hanging. With `allowEmptyEndpoints(false)` this gates
+  **initial readiness only**: Armeria ignores an update that would empty the group,
+  so a backend that was ready once is never dropped — per-pod health is the readiness
+  probe's job (see [Load Balancing](01_Load_Balancing.md#connection-pinning-and-recycling)). This is the
   same mechanism covered from the resilience angle in the
   [Fault Tolerance investigation](18_Fault_Tolerance.md#4-dependency-resilience--surviving-a-sick-downstream).
 

@@ -30,6 +30,9 @@ data:
   AGENT_WORKFLOW_SERVICE_URL: "http://recsys-model-serving:8080"
   OBSERVABILITY_SERVICE_URL: "http://recsys-model-serving:8080"
   GATEWAY_TIMEOUT_MS: "3000"
+  # Recycle each gateway->backend connection after this age so kube-proxy re-picks a pod; without it
+  # one HTTP/2 connection pins a gateway pod to one backend pod. 0 disables. See 01_Load_Balancing.md.
+  GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS: "30000"
   # Optional API-key auth. Keep unset by default; inject via Secret in production:
   # GATEWAY_API_KEYS: "replace-with-secret"
   # Fail-closed guard: with no GATEWAY_API_KEYS and no GATEWAY_COGNITO_ISSUER the gateway

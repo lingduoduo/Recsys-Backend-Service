@@ -333,8 +333,8 @@ attach:
   state machine that also backs the LLM proxy and Redis rate limiter. See
   [Fault Tolerance §1](18_Fault_Tolerance.md#1-request-tier-resilience--circuit-breakers-bulkheads-fault-injection).
 - **Health-checked upstreams + registry resolution** — `UpstreamEndpointGroups` keep a backend
-  that has never answered its **GET** probe out of selection, so a request fast-fails `503` instead of
-  hanging; that gate is **initial readiness only** — once a backend is selectable it is never dropped,
+  that has never answered its **GET** probe out of selection, so a request to it is
+  answered `503` once the selection timeout (set to `GATEWAY_TIMEOUT_MS`) expires; that gate is **initial readiness only** — once a backend is selectable it is never dropped,
   and per-pod health is the readiness probe's job. Upstream connections are recycled every
   `GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS` (default 30000, `0` disables) so kube-proxy keeps
   re-picking backend pods — see [Load Balancing](01_Load_Balancing.md#connection-pinning-and-recycling).

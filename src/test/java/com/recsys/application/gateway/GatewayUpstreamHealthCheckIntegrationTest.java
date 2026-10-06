@@ -102,7 +102,7 @@ class GatewayUpstreamHealthCheckIntegrationTest {
     }
 
     @Test
-    void unhealthyUpstreamIsDroppedAndFastFailsWith503() {
+    void neverHealthyUpstreamFailsWith503() {
         // Nothing listens on this port, so the health check never passes: the endpoint stays out of the
         // group and selection fails fast (bounded by the selection timeout) with 503 rather than hanging.
         int deadPort = healthyUpstream.httpPort() + 1;

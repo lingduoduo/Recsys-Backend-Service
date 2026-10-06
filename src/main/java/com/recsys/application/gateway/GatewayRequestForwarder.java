@@ -5,6 +5,7 @@ import com.recsys.ratelimit.GatewayRateLimiter;
 import com.recsys.ratelimit.TokenBucket;
 import com.recsys.resilience.RouteCircuitBreaker;
 
+import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.WebClient;
 import com.linecorp.armeria.client.retry.Backoff;
 import com.linecorp.armeria.client.retry.RetryRule;
@@ -50,6 +51,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
             Set.of("authorization", "x-api-key", GatewayOriginSecret.HEADER);
 
     private final UpstreamEndpointGroups staticUpstreams;     // non-null when registry disabled
+    private final ClientFactory upstreamClientFactory;        // owned; non-null when registry disabled
     private final RegistryBackedUpstreams registryUpstreams;  // non-null when registry enabled
     private final Map<String, RouteCircuitBreaker> circuitBreakers;
     private final GatewayRateLimiter rateLimiter;
@@ -118,7 +120,9 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
                             AdminTokenGuard operatorGuard) {
         this.circuitBreakers = Map.copyOf(circuitBreakers);
         this.rateLimiter = rateLimiter == null ? GatewayRateLimiter.disabled() : rateLimiter;
-        this.staticUpstreams = UpstreamEndpointGroups.create(routes, timeout, retryDecorator(), healthConfig);
+        this.upstreamClientFactory = healthConfig.newClientFactory();
+        this.staticUpstreams = UpstreamEndpointGroups.create(routes, timeout, retryDecorator(), healthConfig,
+                upstreamClientFactory);
         this.registryUpstreams = null;
         this.userScopeRejected = counter(registry);
         this.circuitMetrics = GatewayCircuitMetrics.create(registry);
@@ -135,6 +139,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
         this.circuitBreakers = Map.copyOf(circuitBreakers);
         this.rateLimiter = rateLimiter == null ? GatewayRateLimiter.disabled() : rateLimiter;
         this.staticUpstreams = null;
+        this.upstreamClientFactory = null;
         this.registryUpstreams = registryUpstreams;
         this.userScopeRejected = counter(registry);
         this.circuitMetrics = GatewayCircuitMetrics.create(registry);
@@ -203,6 +208,7 @@ public final class GatewayRequestForwarder implements java.io.Closeable {
             registryUpstreams.close();
         } else {
             staticUpstreams.close();
+            upstreamClientFactory.close();
         }
     }
 

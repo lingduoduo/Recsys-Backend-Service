@@ -1,6 +1,8 @@
 package com.recsys.application.gateway;
 
+import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.WebClient;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -12,6 +14,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class UpstreamEndpointGroupsTest {
+
+    // The groups never own the factory; each test's owner (this class) closes it.
+    private final ClientFactory factory = ClientFactory.builder().build();
+
+    @AfterEach
+    void closeFactory() {
+        factory.close();
+    }
 
     private static MicroserviceRoute route(String name, String baseUri, String healthPath) {
         return new MicroserviceRoute(name, "/api/" + name, name.toUpperCase() + "_URL",
@@ -31,7 +41,7 @@ class UpstreamEndpointGroupsTest {
         // Dedup happens before any health wrapping, so it is independent of the health-check flag;
         // use the no-probe config to keep the unit test free of background health-check log noise.
         UpstreamEndpointGroups groups = UpstreamEndpointGroups.create(
-                routes, Duration.ofSeconds(3), null, cfg(false));
+                routes, Duration.ofSeconds(3), null, cfg(false), factory);
         try {
             // Two unique (host,port,healthPath) keys -> two endpoint groups.
             assertThat(groups.groupCount()).isEqualTo(2);
@@ -48,7 +58,7 @@ class UpstreamEndpointGroupsTest {
     void healthCheckDisabledStillBuildsAClientPerRoute() {
         List<MicroserviceRoute> routes = List.of(route("a", "http://localhost:6010", "/health"));
         UpstreamEndpointGroups groups = UpstreamEndpointGroups.create(
-                routes, Duration.ofSeconds(3), null, cfg(false));
+                routes, Duration.ofSeconds(3), null, cfg(false), factory);
         try {
             assertThat(groups.groupCount()).isEqualTo(1);
             assertThat(groups.clientFor("a")).isNotNull();
@@ -61,7 +71,7 @@ class UpstreamEndpointGroupsTest {
     void closeIsIdempotent() {
         List<MicroserviceRoute> routes = List.of(route("a", "http://localhost:6010", "/health"));
         UpstreamEndpointGroups groups = UpstreamEndpointGroups.create(
-                routes, Duration.ofSeconds(3), null, cfg(false));
+                routes, Duration.ofSeconds(3), null, cfg(false), factory);
         groups.close();
         groups.close(); // must not throw
     }

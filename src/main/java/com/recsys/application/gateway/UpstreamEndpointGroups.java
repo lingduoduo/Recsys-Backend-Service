@@ -92,7 +92,8 @@ final class UpstreamEndpointGroups implements java.io.Closeable {
     static UpstreamEndpointGroups create(List<MicroserviceRoute> routes,
                                          Duration responseTimeout,
                                          Function<? super HttpClient, ? extends HttpClient> decorator,
-                                         UpstreamClientConfig config) {
+                                         UpstreamClientConfig config,
+                                         ClientFactory factory) {
         Map<String, EndpointGroup> groupsByKey = new LinkedHashMap<>();
         List<EndpointGroup> owned = new ArrayList<>();
         Map<String, WebClient> clients = new HashMap<>();
@@ -107,12 +108,13 @@ final class UpstreamEndpointGroups implements java.io.Closeable {
             String key = protocol.uriText() + "://" + host + ":" + port + healthPath;
 
             EndpointGroup group = groupsByKey.computeIfAbsent(key, k -> {
-                EndpointGroup built = buildGroup(protocol, host, port, healthPath, responseTimeout, config);
+                EndpointGroup built = buildGroup(protocol, host, port, healthPath, responseTimeout, config, factory);
                 owned.add(built);
                 return built;
             });
 
             WebClientBuilder wcb = WebClient.builder(protocol, group)
+                    .factory(factory)
                     .responseTimeoutMillis(responseTimeout.toMillis());
             if (decorator != null) {
                 wcb.decorator(decorator);
@@ -147,7 +149,7 @@ final class UpstreamEndpointGroups implements java.io.Closeable {
 
     private static EndpointGroup buildGroup(SessionProtocol protocol, String host, int port,
                                             String healthPath, Duration responseTimeout,
-                                            UpstreamClientConfig config) {
+                                            UpstreamClientConfig config, ClientFactory factory) {
         // Static endpoint — Armeria's default per-connection resolver handles the host (literal IPs,
         // localhost, and DNS names alike), identical to the previous plain-WebClient behavior.
         Endpoint endpoint = Endpoint.of(host, port);
@@ -164,6 +166,7 @@ final class UpstreamEndpointGroups implements java.io.Closeable {
         // gateway's own GET-based /health aggregation reported them UP. GET matches that aggregation.
         return HealthCheckedEndpointGroup.builder(endpoint, healthPath)
                 .protocol(protocol)
+                .clientFactory(factory)
                 .useGet(true)
                 .retryIntervalMillis(config.healthCheckIntervalMs())
                 .selectionTimeoutMillis(responseTimeout.toMillis())

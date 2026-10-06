@@ -2,6 +2,7 @@ package com.recsys.application.gateway;
 
 import com.recsys.infrastructure.registry.ServiceRegistryProvider;
 
+import com.linecorp.armeria.client.ClientFactory;
 import com.linecorp.armeria.client.HttpClient;
 import com.linecorp.armeria.client.WebClient;
 
@@ -27,6 +28,9 @@ final class RegistryBackedUpstreams implements java.io.Closeable {
     private final Function<? super HttpClient, ? extends HttpClient> decorator;
     private final UpstreamEndpointGroups.UpstreamClientConfig healthConfig;
     private final ServiceRegistryProvider provider;
+    // One factory for this object's lifetime: a rebuild swaps endpoint groups but must not close the
+    // connections that requests still in flight on the old groups are using.
+    private final ClientFactory clientFactory;
 
     private volatile Map<String, String> resolvedAddresses;   // routeName -> effective base URI
     private volatile UpstreamEndpointGroups current;
@@ -42,6 +46,7 @@ final class RegistryBackedUpstreams implements java.io.Closeable {
         this.decorator = decorator;
         this.healthConfig = healthConfig;
         this.provider = provider;
+        this.clientFactory = healthConfig.newClientFactory();
         this.resolvedAddresses = resolveAddresses();
         this.current = build(this.resolvedAddresses);
     }
@@ -63,7 +68,7 @@ final class RegistryBackedUpstreams implements java.io.Closeable {
             effectiveRoutes.add(new MicroserviceRoute(route.name(), route.prefix(), route.envVar(),
                     effective, route.healthPath(), route.serviceName()));
         }
-        return UpstreamEndpointGroups.create(effectiveRoutes, timeout, decorator, healthConfig);
+        return UpstreamEndpointGroups.create(effectiveRoutes, timeout, decorator, healthConfig, clientFactory);
     }
 
     WebClient clientFor(String routeName) {
@@ -97,5 +102,6 @@ final class RegistryBackedUpstreams implements java.io.Closeable {
         }
         closed = true;
         current.close();
+        clientFactory.close();
     }
 }

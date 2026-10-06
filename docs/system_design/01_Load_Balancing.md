@@ -15,7 +15,7 @@ production data path:
 | Layer | What it is | Prod or reference |
 |---|---|---|
 | Edge + cluster LB | AWS ALB Ingress → kube-proxy ClusterIP → topology-aware routing | **production** |
-| Client-side LB | Armeria `UpstreamEndpointGroups` (health-checked, per-backend) | **production** |
+| Gateway upstream clients | Armeria `UpstreamEndpointGroups` (one Service address per backend; connection recycling + startup health gate) | **production** |
 | Capacity-weight feedback | `X-Capacity-Weight` / `suggestedWeight` from the load shedders | **production** (signal) |
 | `ApplicationLoadBalancer` | in-memory L7 listener→rule→target-group→round-robin model | **reference / tested** |
 
@@ -35,14 +35,50 @@ Real traffic is balanced by infrastructure, in three nested tiers:
   through ClusterIP names, and `trafficDistribution: PreferClose` prefers same-AZ
   endpoints to cut cross-AZ cost — detailed in
   [17_Scalability](17_Scalability.md#1-compute-tier-scaling--hpa-is-the-real-autoscaler).
-- **Armeria client-side LB (gateway → backends).** The gateway wraps each upstream in a
-  `HealthCheckedEndpointGroup` (`UpstreamEndpointGroups`) that drops a down backend from
-  selection and load-balances across the healthy replicas — covered in
+- **Armeria upstream clients (gateway → backends).** The gateway wraps each upstream in a
+  `HealthCheckedEndpointGroup` (`UpstreamEndpointGroups`) — but each group holds **one**
+  endpoint, the backend's ClusterIP Service address, so Armeria does no balancing of its
+  own: the pod is kube-proxy's choice, made once per TCP connection. A shared client
+  factory recycles connections every `GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS` (default
+  30 s) so that choice keeps being re-made — see
+  [Connection pinning and recycling](#connection-pinning-and-recycling). The health check
+  gates initial readiness only. Covered in
   [09_API_Gateway](09_API_Gateway.md#5-resilience-the-gateway-applies-cross-links) and
   [11_Service_Discovery](11_Service_Discovery.md#3-cloud-map-dns--health-checked-endpoint-groups).
 
 At the data layer, AZ-aware Redis read routing is a form of read load-balancing across
 replicas — [04_Replication](04_Replication.md#1-redis-read-replicas--az-aware-read-routing).
+
+### Connection pinning and recycling
+
+kube-proxy balances **connections**, not requests. Armeria speaks h2c to the Armeria
+backends (catalog 6010, online 7010) and multiplexes every request onto one long-lived
+HTTP/2 connection, so before 2026-10-06 each gateway pod was pinned to one backend pod
+for as long as that connection lived — and pods added by the HPA got no gateway traffic
+at all. Measured with a per-connection round-robin TCP proxy standing in for kube-proxy:
+
+| Setup | Result |
+|---|---|
+| 2 pods, 2048 requests, 64 in flight | 1 TCP connection; 100% of requests on one pod |
+| scale out to 4 pods, 2048 more | still 100% on the original pod; new pods got 0 |
+| `maxConnectionAgeMillis(1000)` | 8 connections; 4352 / 6080 / 7232 / 6336 across 4 pods, 0 errors |
+| one pod, healthy → unhealthy | never dropped from selection (`allowEmptyEndpoints(false)`) |
+
+The fix keeps the kube-proxy path — so `trafficDistribution: PreferClose` still holds —
+and gives the upstream `WebClient`s and health checkers one shared `ClientFactory` with
+`maxConnectionAgeMillis` set from `GATEWAY_UPSTREAM_MAX_CONNECTION_AGE_MS` (default
+`30000`; `0` disables; `1..999` and negatives fail startup, Armeria's floor being 1 s).
+An aged connection takes no new requests, finishes its in-flight ones, and closes; the
+next request opens a fresh connection and kube-proxy picks again. The factory belongs to
+`GatewayRequestForwarder` (static upstreams) or `RegistryBackedUpstreams` (registry
+path), and outlives endpoint-group rebuilds so a swap never closes connections that
+in-flight requests are still using.
+
+The health check is deliberately left gating **initial readiness only**. Making it drop
+an endpoint after startup (`allowEmptyEndpoints(true)`) would turn harmful once
+connections rotate: each probe lands on a random pod, so one bad pod out of N would
+periodically empty the whole backend and `503` every request. Readiness probes already
+remove a bad pod from the Service's endpoints.
 
 ## 2. Capacity-weight feedback — the app → LB signal
 
@@ -99,7 +135,7 @@ as the unit under test for that routing logic.
 ## 4. How the layers relate
 
 - **Load-bearing in production:** AWS ALB (edge), kube-proxy + topology-aware routing
-  (in-cluster), Armeria health-checked endpoint groups (gateway → backends), AZ-aware
+  (in-cluster), Armeria upstream clients with connection recycling (gateway → backends), AZ-aware
   Redis read routing (data). These actually move packets.
 - **The feedback loop:** the capacity-weight signal is what makes any of those balancers
   *capacity-aware* rather than merely *liveness-aware* — the app publishes `X-Capacity-
@@ -115,8 +151,11 @@ as the unit under test for that routing logic.
 - **Capacity weight** — the load-shedder tests (`LoadShedderTest`,
   `OnlineLoadShedderTest`) cover `suggestedWeight = (1 − util) × 100` and the
   shutting-down → 0 case.
-- **Client-side health-aware LB** — `GatewayUpstreamHealthCheckIntegrationTest` covers
-  dropping an unhealthy upstream and fast-failing.
+- **Gateway upstream clients** — `UpstreamSelectionTest` drives a per-connection
+  round-robin proxy standing in for kube-proxy: with recycling every pod receives requests,
+  without it one pod takes everything, and a pod that turns unhealthy after startup stays
+  selectable (in the `-Presilience` PR gate). `GatewayUpstreamHealthCheckIntegrationTest`
+  covers a never-healthy upstream fast-failing with `503`.
 
 ## Design specs & plans
 
@@ -134,6 +173,10 @@ model has none (it is a reference/test artifact, not a shipped feature).
 - **The edge ALB** — [Gateway WAF Ingress](../superpowers/specs/2026-07-02-gateway-waf-ingress-design.md)
   ([plan](../superpowers/plans/2026-07-02-gateway-waf-ingress.md)): the WAF-protected
   ALB Ingress that replaces the NLB as the sole public entry (§1).
+- **Gateway connection recycling** — [Gateway Upstream Connection Recycling](../superpowers/specs/2026-10-06-gateway-upstream-connection-recycling-design.md)
+  ([plan](../superpowers/plans/2026-10-06-gateway-upstream-connection-recycling.md)): the
+  shared `ClientFactory` with a max connection age, and the initial-readiness health gate
+  ([Connection pinning and recycling](#connection-pinning-and-recycling)).
 - **Capacity-weight feedback** — [Overload Protection Hardening](../superpowers/specs/2026-07-08-overload-protection-design.md)
   ([plan](../superpowers/plans/2026-07-08-overload-protection.md)): the load shedders
   that compute `suggestedWeight` and emit `X-Capacity-Weight` (§2).
@@ -148,8 +191,9 @@ model has none (it is a reference/test artifact, not a shipped feature).
 2. **Capacity-weight needs an external consumer.** The app *emits* `X-Capacity-Weight`,
    but nothing balances on it unless an ALB target-group / Envoy / mesh is configured to
    read it; on its own it's just an observable signal.
-3. **Two independent "is it up?" signals.** Armeria health checks (~10 s, drops from LB)
-   and the registry TTL (~20–40 s) detect a down backend on different timescales — see
+3. **Two independent "is it up?" signals.** Armeria health checks (~10 s, but only until a
+   backend first becomes ready — see edge 7) and the registry TTL (~20–40 s) detect a down
+   backend on different timescales — see
    [11_Service_Discovery](11_Service_Discovery.md); capacity weight is a third, finer
    signal that acts before either trips.
 4. **Readiness drain is binary; weight is a gradient.** `/health/ready` → `503` removes a
@@ -158,3 +202,14 @@ model has none (it is a reference/test artifact, not a shipped feature).
 5. **Round-robin is even, not capacity-aware, inside the model.** `AlbTargetGroup`
    round-robins healthy targets equally; capacity-aware shifting happens at the *real* LB
    via the weight header, not inside the in-memory model.
+6. **Gateway → backend balancing is time-averaged, not per request.** Connection
+   recycling spreads load across pods *over time*; at any instant, at most
+   gateway-replica-count backend pods carry gateway traffic for a given backend. True
+   per-request, per-pod balancing (headless Services + Armeria DNS endpoint groups,
+   optionally weighted by `X-Capacity-Weight`) would bypass kube-proxy and therefore
+   `PreferClose`, and would need same-AZ preference rebuilt in the gateway.
+7. **The gateway health check never drops a backend after startup.** It keeps a
+   never-ready backend out of selection (fast `503`), but `allowEmptyEndpoints(false)`
+   makes Armeria ignore an update that would empty a one-endpoint group. Per-pod health
+   is the readiness probe's job — deliberately; see
+   [Connection pinning and recycling](#connection-pinning-and-recycling).

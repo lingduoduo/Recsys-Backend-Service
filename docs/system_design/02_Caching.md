@@ -594,6 +594,17 @@ that reaches Redis, whereas 6010's cache starts pre-populated from the classpath
 object, two different caches in front of it. Until 2026-10-07 only 6010 survived
 a Redis outage in its first seconds of life; 7010 now answers such a user as a cold user (§9).
 
+**What the cold pod actually costs — measured, and not worth a preload (2026-10-07).** A fresh
+7010 against a seeded local Redis, JIT warmed on one user first, then 32 requests for each of the
+other five: Redis saw **exactly one** `u2vEmb` read per user, and a user's first request issued only
+two per-user reads (that embedding and `user:{id}:recent_movies`); every other read is a shared
+trending/popularity snapshot. First requests ran 4–13 ms against a 2.3–3.5 ms warm median, with a
+Redis round trip of ~0.8 ms — so the embedding miss is one round trip, once per user per pod, and
+most of the first-request delta is per-user code running for the first time, which a preload
+would not touch. A preload also cannot scale past the 10,000-entry cap, and a Bloom filter would
+only help IDs with no embedding, which the null sentinel already holds to one read per 30 s.
+Deliberately left as is.
+
 A third sense is worth separating out because it *is* handled: a **cold Redis**.
 `seedEmbeddings` repairs a missing or partially-evicted embedding keyspace per-ID at startup
 (§8), `ShardedTopKStore` falls back to the legacy unversioned key before Flink's first canonical

@@ -87,9 +87,12 @@ public class RetrievalRecommendationController {
             try {
                 raw = redis.opsForValue().get(key);
             } catch (Exception e) {
+                // Still a 200 with an empty vector, but marked and counted: an outage must not read as
+                // "this item has no embedding", nor as a success in the request-error metric. The model
+                // service's readiness gate reads ONNX inference metrics, not these, so this cannot pull
+                // the pod out of rotation.
                 log.error("Redis fetch failed for embedding {}", key, e);
-                error = false;
-                return Map.of("item", item, "embedding", List.of());
+                return Map.of("item", item, "embedding", List.of(), "degraded", true);
             }
             if (raw == null) {
                 error = false;
@@ -125,6 +128,17 @@ public class RetrievalRecommendationController {
         try {
             int boundedLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
             RecommendationResult result = recommendationService.recommend(user, boundedLimit);
+            if (result.degraded()) {
+                // The service already degraded to an empty answer; surface it rather than report success.
+                return Map.of(
+                    "user", result.user(),
+                    "recent", result.recent(),
+                    "recommendations", result.recommendations(),
+                    "diagnostics", result.candidateDiagnostics(),
+                    "metrics", result.metrics(),
+                    "degraded", true
+                );
+            }
             error = false;
             return Map.of(
                 "user", result.user(),

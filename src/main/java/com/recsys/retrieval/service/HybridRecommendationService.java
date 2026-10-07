@@ -196,7 +196,7 @@ public class HybridRecommendationService {
             hydratedQuery = measurementService.timeStage("hydration", () -> hydrateQuery(query));
         } catch (Exception e) {
             log.error("Recommendation fetch failed for user {}", user, e);
-            return new RecommendationResult(user, List.of(), List.of(), List.of(), Map.of());
+            return RecommendationResult.degraded(user);
         }
         List<String> recent = hydratedQuery.watchedMovieIds();
         List<String> rated = hydratedQuery.ratedMovieIds();
@@ -254,7 +254,7 @@ public class HybridRecommendationService {
             });
         } catch (PopularityFetchException e) {
             log.error("Recommendation fetch failed for user {}", user, e.getCause());
-            return new RecommendationResult(user, List.of(), List.of(), List.of(), Map.of());
+            return RecommendationResult.degraded(user);
         }
 
         List<ScoredCandidate> scored = measurementService.timeStage("scoring", () -> {

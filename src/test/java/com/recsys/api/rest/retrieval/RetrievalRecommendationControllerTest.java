@@ -428,4 +428,44 @@ class RetrievalRecommendationControllerTest {
 
         verify(measurementService).recordRequest(eq("profile"), any(Duration.class), eq(false), eq(false));
     }
+
+    // --- Redis unavailable: degrade to an empty 200, but say so and count it as an error ---
+
+    @Test
+    void embeddingRedisFailureIsMarkedDegradedAndCountedAsAnError() throws Exception {
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(ops);
+        when(ops.get(anyString()))
+            .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("redis down"));
+
+        mockMvc.perform(get("/api/v1/retrieval/embedding/item1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.embedding").isEmpty())
+            .andExpect(jsonPath("$.degraded").value(true));
+        verify(measurementService).recordRequest(eq("embedding"), any(Duration.class), eq(true), eq(false));
+    }
+
+    @Test
+    void embeddingMissIsNotDegradedAndNotAnError() throws Exception {
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(ops);
+        when(ops.get(anyString())).thenReturn(null);
+
+        mockMvc.perform(get("/api/v1/retrieval/embedding/item1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.embedding").isEmpty())
+            .andExpect(jsonPath("$.degraded").doesNotExist());
+        verify(measurementService).recordRequest(eq("embedding"), any(Duration.class), eq(false), eq(false));
+    }
+
+    @Test
+    void degradedRecommendationIsMarkedAndCountedAsAnError() throws Exception {
+        when(recommendationService.recommend("u1", 6)).thenReturn(RecommendationResult.degraded("u1"));
+
+        mockMvc.perform(get("/api/v1/retrieval/recommend/u1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.recommendations").isEmpty())
+            .andExpect(jsonPath("$.degraded").value(true));
+        verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(true), eq(false));
+    }
 }

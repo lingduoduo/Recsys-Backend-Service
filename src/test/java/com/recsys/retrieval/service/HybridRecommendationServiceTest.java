@@ -493,4 +493,42 @@ class HybridRecommendationServiceTest {
         profile.setTags(List.of(genre));
         return profile;
     }
+
+    // --- Redis unavailable: the two fetch stages that swallow the failure must say so ---
+
+    private static HybridRecommendationService serviceOver(StringRedisTemplate redis,
+                                                           MovieLensUserHistoryQueryHydrator hydrator) {
+        RecommendationProperties properties = new RecommendationProperties();
+        FeatureCache featureCache = new FeatureCache(properties);
+        return new HybridRecommendationService(
+            redis, properties, new OnlineLearningService(redis, properties, featureCache), featureCache,
+            List.of(hydrator), new RecommendationMeasurementService(new SimpleMeterRegistry(), properties, featureCache));
+    }
+
+    @Test
+    void popularityFetchFailureReturnsAnEmptyResultMarkedDegraded() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ZSetOperations<String, String> sortedSets = mock(ZSetOperations.class);
+        when(redis.opsForZSet()).thenReturn(sortedSets);
+        when(sortedSets.reverseRangeWithScores(eq("global:item_popularity"), eq(0L), anyLong()))
+            .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("redis down"));
+
+        RecommendationResult result = serviceOver(redis, new MovieLensUserHistoryQueryHydrator(
+            userId -> new UserMovieHistory(List.of(), List.of()))).recommend("u1", 3);
+
+        assertTrue(result.recommendations().isEmpty());
+        assertTrue(result.degraded(), "an outage must not look like a user with nothing to recommend");
+    }
+
+    @Test
+    void hydrationFailureReturnsAnEmptyResultMarkedDegraded() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+
+        RecommendationResult result = serviceOver(redis, new MovieLensUserHistoryQueryHydrator(userId -> {
+            throw new org.springframework.data.redis.RedisConnectionFailureException("redis down");
+        })).recommend("u1", 3);
+
+        assertTrue(result.recommendations().isEmpty());
+        assertTrue(result.degraded());
+    }
 }

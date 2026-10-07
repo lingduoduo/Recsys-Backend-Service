@@ -1,4 +1,5 @@
 package com.recsys.application.model;
+import com.recsys.infrastructure.vectordb.ItemEmbeddingRefresher;
 import com.recsys.application.experiment.ModelVariants;
 import com.recsys.application.ranking.RankingStage;
 import com.recsys.application.retrieval.ModelRetrievalStage;
@@ -75,6 +76,7 @@ public class ModelRuntimeProvider implements SmartInitializingSingleton {
     private RedisExecutor redisItemEmbeddingPool;
     private RedisExecutor recallPool;
     private CandidateGenerator candidateGenerator;
+    private ItemEmbeddingRefresher itemRefresher;
     private TrendingStore topkStore;
     private GlobalPopularityStore globalPopStore;
     private OnlineFeatureStore onlineFeatureStore;
@@ -242,6 +244,12 @@ public class ModelRuntimeProvider implements SmartInitializingSingleton {
             recallPool = LettuceClientFactory.routingFromEnv(RECALL_REDIS_TIMEOUT_MS);
             DataManager dataManager = DataManager.getInstance();
             candidateGenerator = new CandidateGenerator(dataManager, new RedisEmbeddingStore(recallPool, "u2vEmb"));
+            // Keeps the recall index tracking batch rewrites of i2vEmb in Redis (02_Caching §10). Built once
+            // per provider: the generator is only replaced in close(), so the loop metrics bind once.
+            itemRefresher = ItemEmbeddingRefresher.forGenerator(
+                    candidateGenerator, dataManager::getAllMovieIds,
+                    new RedisEmbeddingStore(recallPool, "i2vEmb"), List.of(), meterRegistry);
+            itemRefresher.start(ItemEmbeddingRefresher.intervalFromEnv(System::getenv));
             topkStore = new ShardedTopKStore(recallPool, "topk:");
             globalPopStore = new GlobalPopularityStore(recallPool);
             onlineFeatureStore = new OnlineFeatureStore(recallPool);
@@ -354,6 +362,11 @@ public class ModelRuntimeProvider implements SmartInitializingSingleton {
         }
         runtimes.clear();
         synchronized (recallLock) {
+            // Before recallPool closes, so no in-flight pass reads through a closed connection.
+            if (itemRefresher != null) {
+                itemRefresher.close();
+                itemRefresher = null;
+            }
             if (recallExecutor != null) {
                 GracefulExecutors.shutdownGracefully(recallExecutor);
                 recallExecutor = null;

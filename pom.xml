@@ -389,6 +389,12 @@
                 <include>**/ratelimit/RedisRateLimiterTest.java</include>
                 <include>**/retrieval/multichannel/*DegradationTest.java</include>
                 <include>**/retrieval/multichannel/*BulkheadTest.java</include>
+                <!-- Redis down on a cold cache. 7010's two snapshot reads (recent history, trending) sit
+                     outside the recall fan-out, so without their fallbacks a Redis outage 500s every
+                     request while readiness stays green; 6010's startup Redis repair, unguarded, exits
+                     the process with code 1 (both measured against a dead Redis port). Pure unit tests. -->
+                <include>**/application/online/OnlineRecommendationServiceTest.java</include>
+                <include>**/serving/RecSysServerRedisDownStartupTest.java</include>
                 <include>**/vectordb/MultiVectorMathTest.java</include>
                 <include>**/vectordb/ExactMultiVectorIndexTest.java</include>
                 <include>**/vectordb/CoRatedTokenBagsTest.java</include>

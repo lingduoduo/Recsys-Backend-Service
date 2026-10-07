@@ -20,8 +20,8 @@ or unbounded cache is worse than no cache:
   bounded stale window rather than erroring (fail-open — the availability choice from
   [05_CAP](05_CAP.md#2-reads-are-ap-by-default)). **Only when a last-good value exists.**
   With nothing cached for the key, three of the four families rethrow instead: the rule is
-  fail-open on a *warm* cache and fail-closed on a *cold* one, and §9 measures what that
-  costs.
+  fail-open on a *warm* cache and fail-closed on a *cold* one. §9 measures what that cost —
+  a 500 on 7010 and a failed boot on 6010 — and how the callers now absorb it.
 - **Keyed by version** — result caches key on the A/B variant + model version, so a
   deploy naturally invalidates without an explicit purge.
 
@@ -466,7 +466,32 @@ propagated the exception and the healthy channel was never consulted — no degr
 window: a restarted pod, a user seen for the first time, or an entry evicted past its stale
 bound. In steady state the same outage degrades correctly.
 
-Note the last line above. **Readiness stays green while the main route returns 500**, because
+**Fixed (2026-10-07).** The stores still rethrow on a cold cache; the three callers now absorb it
+on the replica path, each choosing an explicit degraded answer:
+
+| Read | Degraded answer | Signal |
+|---|---|---|
+| Recent history | empty — nothing excluded, no `recentMovies` | `online_recommendation_degraded_reads_total{read="recent_history"}` + WARN |
+| Cold-user probe | recall as a **cold user** (`QuotaPolicy.cold`) | degraded channel `user-embedding` in `RecallResult` + WARN |
+| Trending snapshot | empty `trendingMovies` | `online_recommendation_degraded_reads_total{read="trending"}` + WARN |
+
+The **primary** (read-your-writes) path is unchanged on purpose: it still propagates, and 7010
+answers `503` with `Retry-After` rather than a guess. Re-measured against the real server and a
+dead Redis port, same user, before and after:
+
+```
+main:   attempt 1: HTTP 500  {"error":"internal server error"}     /health/ready -> 200
+fixed:  attempt 1: HTTP 200  {"user":{"userId":123,…},"recentMovies":[],"trendingMovies":[],
+                              "recommendations":[{"id":11,…}, …]}   /health/ready -> 200
+```
+
+Global popularity still answers from its `DataManager` pool, which is why a cold user gets real
+recommendations rather than an empty list. One residual: 7010 never registers
+`RecallDegradationMetrics` on its Prometheus registry (6010 does), so the `user-embedding`
+degradation is visible there only in the log. Pinned by `OnlineRecommendationServiceTest` and
+`MultiChannelRecallDegradationTest`, both in the `-Presilience` gate.
+
+Note the last line of the original measurement above. **Readiness stays green while the main route returns 500**, because
 `OnlineHealthService` reports process and load-shedder state rather than dependency health, so
 Kubernetes keeps the pod in rotation. That is the intended split — a Redis blip should not
 cascade into a rolling restart — but it means the blast radius of a cold-cache outage is every
@@ -490,6 +515,13 @@ connections open lazily so "startup paths that build stores up-front keep workin
 fast — at request time, where callers fall back." That property holds for the executor and is
 then given away by the two eager reads in `main`. 7010 boots fine under the same conditions and
 fails at request time instead.
+
+**Fixed (2026-10-07).** Both are repair operations, not preconditions — the classpath preload has
+already given both heap caches every sample embedding — so `RecSysServer.repairAndWarmFromRedis`
+runs the seed repair and both `warmUp()` calls best-effort, logging a WARN per skipped step. With
+the same dead Redis port, 6010 now boots in ~4 s and answers `/getrecommendation` with `200`. A
+step skipped at boot is not retried until the next restart. Pinned by
+`RecSysServerRedisDownStartupTest` (in the `-Presilience` gate).
 
 ## 10. Per-object inventory — what each cached thing actually gets
 
@@ -551,8 +583,8 @@ reaches the same answer through its null-sentinel cache, one Redis miss per 30 s
 describes. The two interact badly in exactly one place: 7010's `LogicalExpiryEmbeddingCache`
 has neither a classpath preload nor a Bloom filter, so on a new pod every user is a cold miss
 that reaches Redis, whereas 6010's cache starts pre-populated from the classpath. Same logical
-object, same nominal "three-tier embedding cache" description, and only one of the two survives
-a Redis outage in its first seconds of life.
+object, same nominal "three-tier embedding cache" description. Until 2026-10-07 only 6010 survived
+a Redis outage in its first seconds of life; 7010 now answers such a user as a cold user (§9).
 
 A third sense is worth separating out because it *is* handled: a **cold Redis**.
 `seedEmbeddings` repairs a missing or partially-evicted embedding keyspace per-ID at startup
@@ -577,9 +609,11 @@ variant. An empty Redis is a supported state. An *unreachable* one, on a cold JV
    backing-store outage caches serve old data rather than error; that's deliberate (AP), but
    it means a Redis incident can silently extend staleness to the stale-window bound. With
    *nothing* cached for the key, three of the four families rethrow instead, and the three
-   pre-fan-out reads in `OnlineRecommendationService.recommend` turn that into an HTTP 500
-   with readiness still green (§9, measured). **Open** — fixing it means choosing a
-   degradation policy for each of those three reads, which is a serving-contract decision.
+   pre-fan-out reads in `OnlineRecommendationService.recommend` turned that into an HTTP 500
+   with readiness still green (§9, measured). **Resolved 2026-10-07** — each read now has an
+   explicit degraded answer on the replica path (empty history, cold user, empty trending);
+   the primary path still fails loudly by contract. Residual: 7010 does not export
+   `RecallDegradationMetrics`, so the cold-user fallback is log-only there.
 4. **LLM caching assumes determinism.** Caching a model's output is only sound because the
    demo runs at temperature 0; a nonzero-temperature deployment would serve one sampled
    answer for all identical prompts.
@@ -617,11 +651,11 @@ variant. An empty Redis is a supported state. An *unreachable* one, on a cold JV
    `i2vEmb` rewrite reaches `/similar` immediately and embedding recall never (§10). **Open**
    — a periodic index rebuild is the obvious fix and also the one that would make embedding
    recall newly dependent on Redis availability, which today it is not.
-10. **6010 cannot boot with Redis down.** `seedEmbeddings` and `LocalEmbeddingCache.warmUp()`
-   are eager Redis reads in `main`, so the process exits code 1 (§9, verified by running it),
+10. **6010 could not boot with Redis down.** `seedEmbeddings` and `LocalEmbeddingCache.warmUp()`
+   were eager Redis reads in `main`, so the process exited code 1 (§9, verified by running it),
    giving away the lazy-connect property `LettuceRedisExecutor` was designed to provide.
-   **Open** — the fix is to let both fail soft, since both are repair operations rather than
-   preconditions.
+   **Resolved 2026-10-07** — both now run best-effort; a step skipped at boot waits for the
+   next restart.
 11. **One of three serving services caches recommendation lists.** 8080 has
    `RecommendationCache`; 6010 and 7010 recompute per request (§10). Deliberate — only the
    model path has a version to key on — but "recommendations are cached" is not a

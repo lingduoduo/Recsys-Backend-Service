@@ -19,12 +19,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Online recommendation = recall (shared MultiChannelRecallService) -> re-rank (OnlineLearner) ->
  * response snapshot (recent history + per-request trending window). Cold-start detection is handled
  * inside the recall service via the injected user-embedding store.
  */
 public final class OnlineRecommendationService {
+
+    private static final Logger log = LoggerFactory.getLogger(OnlineRecommendationService.class);
 
     private static final Set<String> ALLOWED_WINDOWS = Set.of("last_hour", "last_day", "last_month");
     private static final int RECENT_HISTORY_LIMIT = 3;
@@ -34,12 +41,26 @@ public final class OnlineRecommendationService {
     private final RecentHistoryStore recentHistoryStore;
     private final TrendingStore topkStore;
     private final OnlineLearner onlineLearner;
+    private final Counter recentHistoryDegraded;
+    private final Counter trendingDegraded;
 
     public OnlineRecommendationService(DataManager dataManager,
                                        MultiChannelRecallService recallService,
                                        RecentHistoryStore recentHistoryStore,
                                        TrendingStore topkStore,
                                        OnlineLearner onlineLearner) {
+        this(dataManager, recallService, recentHistoryStore, topkStore, onlineLearner, null);
+    }
+
+    /** @param registry may be null, in which case degraded reads are logged but not counted. */
+    public OnlineRecommendationService(DataManager dataManager,
+                                       MultiChannelRecallService recallService,
+                                       RecentHistoryStore recentHistoryStore,
+                                       TrendingStore topkStore,
+                                       OnlineLearner onlineLearner,
+                                       MeterRegistry registry) {
+        this.recentHistoryDegraded = degradedReadCounter(registry, "recent_history");
+        this.trendingDegraded = degradedReadCounter(registry, "trending");
         this.dataManager = Objects.requireNonNull(dataManager, "dataManager");
         this.recallService = Objects.requireNonNull(recallService, "recallService");
         this.recentHistoryStore = Objects.requireNonNull(recentHistoryStore, "recentHistoryStore");
@@ -49,6 +70,14 @@ public final class OnlineRecommendationService {
 
     public OnlineRecommendationResult recommend(OnlineRecommendationRequest request) {
         return recommend(request, false);
+    }
+
+    private static Counter degradedReadCounter(MeterRegistry registry, String read) {
+        return registry == null ? null
+                : Counter.builder("online_recommendation_degraded_reads_total")
+                        .description("Snapshot reads outside the recall fan-out that failed and were degraded")
+                        .tag("read", read)
+                        .register(registry);
     }
 
     public OnlineRecommendationResult recommendPrimary(OnlineRecommendationRequest request) {
@@ -75,7 +104,7 @@ public final class OnlineRecommendationService {
 
         List<Integer> recentIds = primaryFeatureRead
                 ? recentHistoryStore.getRecentMovieIdsPrimary(request.userId(), RECENT_HISTORY_LIMIT)
-                : recentHistoryStore.getRecentMovieIds(request.userId(), RECENT_HISTORY_LIMIT);
+                : recentHistoryOrEmpty(request.userId());
         Set<String> excluded = new LinkedHashSet<>();
         for (int id : recentIds) excluded.add(String.valueOf(id));
 
@@ -89,7 +118,7 @@ public final class OnlineRecommendationService {
         List<Movie> recentMovies = mapMovies(recentIds);
         List<Movie> trendingMovies = mapMovies(parseIds(primaryFeatureRead
                 ? topkStore.getTopKIdsPrimary(window, k)
-                : topkStore.getTopKIds(window, k)));
+                : trendingOrEmpty(window, k)));
 
         List<Movie> recommendations = rerank(candidates, excluded, k);
         if (recommendations.isEmpty()) {
@@ -120,6 +149,37 @@ public final class OnlineRecommendationService {
                 .filter(Objects::nonNull)
                 .limit(k)
                 .toList();
+    }
+
+    // These two reads sit outside the recall fan-out, so none of its degradation layers cover them, and on a
+    // cold cache their stores rethrow rather than serve stale. Unhandled, a Redis outage turned every
+    // request into a 500 while readiness stayed green. The replica path degrades instead: no history means
+    // nothing is excluded, no trending means an empty snapshot. The primary path keeps failing loudly —
+    // read-your-writes answers 503 + Retry-After rather than a guess.
+    private List<Integer> recentHistoryOrEmpty(int userId) {
+        try {
+            return recentHistoryStore.getRecentMovieIds(userId, RECENT_HISTORY_LIMIT);
+        } catch (RuntimeException e) {
+            degraded(recentHistoryDegraded, "recent history", e);
+            return List.of();
+        }
+    }
+
+    private List<String> trendingOrEmpty(String window, int k) {
+        try {
+            return topkStore.getTopKIds(window, k);
+        } catch (RuntimeException e) {
+            degraded(trendingDegraded, "trending snapshot", e);
+            return List.of();
+        }
+    }
+
+    private static void degraded(Counter counter, String read, RuntimeException e) {
+        if (counter != null) {
+            counter.increment();
+        }
+        log.warn("Degrading {} read to empty: {}", read,
+                e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
     }
 
     private List<Movie> mapMovies(List<Integer> ids) {

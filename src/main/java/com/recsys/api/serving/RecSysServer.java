@@ -100,18 +100,14 @@ public class RecSysServer {
             RedisEmbeddingStore userEmbStore = new RedisEmbeddingStore(jedisPool, "u2vEmb");
             TrendingStore topkStore = new ShardedTopKStore(jedisPool, "topk:");
 
-            seedEmbeddings(embStore, userEmbStore);
-
             // Tier 3: JVM heap caches in front of Redis for both item and user embeddings.
             // preload() from classpath (Tier 1) avoids Redis round-trips at startup;
             // warmUp() then adds any entries written by Flink that aren't in the classpath.
             LocalEmbeddingCache embCache = new LocalEmbeddingCache(embStore);
             embCache.preload(DataLoader.loadMovieEmbeddings());
-            embCache.warmUp();
-
             LocalEmbeddingCache userEmbCache = new LocalEmbeddingCache(userEmbStore);
             userEmbCache.preload(DataLoader.loadUserEmbeddings());
-            userEmbCache.warmUp();
+            repairAndWarmFromRedis(embStore, userEmbStore, embCache, userEmbCache);
 
             CandidateGenerator candidateGenerator = new CandidateGenerator(dataManager, userEmbCache);
 
@@ -264,6 +260,27 @@ public class RecSysServer {
             }
             jedisPool.close();
             throw e;
+        }
+    }
+
+    // Startup Redis work is repair, not a precondition: the classpath preload has already given both caches
+    // every sample embedding, so each step is best-effort. Letting one throw out of run() made 6010 exit with
+    // code 1 whenever Redis was unreachable at boot, giving away the lazy-connect property the executor was
+    // built for. A step skipped here is not retried until the next restart; until then Redis serves whatever
+    // it still holds and the heap caches serve the classpath data.
+    static void repairAndWarmFromRedis(RedisEmbeddingStore embStore, RedisEmbeddingStore userEmbStore,
+                                       LocalEmbeddingCache embCache, LocalEmbeddingCache userEmbCache) {
+        bestEffort("embedding seed repair", () -> seedEmbeddings(embStore, userEmbStore));
+        bestEffort("item embedding cache warm-up", embCache::warmUp);
+        bestEffort("user embedding cache warm-up", userEmbCache::warmUp);
+    }
+
+    private static void bestEffort(String step, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException e) {
+            log.warn("Skipping {} at startup; serving from the classpath preload: {}", step,
+                    e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
         }
     }
 

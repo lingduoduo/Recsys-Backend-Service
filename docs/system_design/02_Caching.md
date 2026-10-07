@@ -579,7 +579,11 @@ branch: /similar?movieId=1 [4, 3, 2, 5, 6] → [9, 4, 10, …]  recommend(123) �
 ```
 
 One race is accepted: a pass that read `v1` just before `POST /setembedding` wrote `v2` re-applies
-`v1`; the next pass reads `v2` and repairs it, so it lasts at most one interval. Catalog membership
+`v1`; the next pass reads `v2` and repairs it, so it lasts one interval. The refresher diffs Redis
+against what *it* last applied, not against what memory holds, so two rarer interleavings leave a
+pod diverged until Redis changes again: on 6010, a request-time cache miss that loads `v1` and
+lands after a refresh put `v2` (the `/similar` cache has no TTL); and `/setembedding` with a TTL
+shorter than the interval, whose key expires before a pass sees it (absent means keep). Catalog membership
 is still deploy-shaped — `DataManager` loads it from the classpath and hits outside it are dropped.
 
 **Recommendation lists are cached on exactly one of the three serving services.** 8080 has

@@ -21,6 +21,8 @@ public class EmbeddingLSH {
 
     private final float[][] hyperplanes; // [numTables][dim]
     private final ConcurrentHashMap<Long, List<Integer>> buckets;
+    // Each id's current bucket, so an update moves the id instead of leaving a copy behind.
+    private final ConcurrentHashMap<Integer, Long> bucketOf = new ConcurrentHashMap<>();
     private final int numTables;
 
     public EmbeddingLSH(Map<Integer, float[]> embeddings) {
@@ -48,11 +50,27 @@ public class EmbeddingLSH {
         return result;
     }
 
-    // Add a new embedding to the index at runtime.
-    // Safe to call concurrently with candidates() due to ConcurrentHashMap and CopyOnWriteArrayList.
+    // Add or move an embedding at runtime. Safe to call concurrently with candidates() (ConcurrentHashMap
+    // and CopyOnWriteArrayList); concurrent add() calls for one id must be serialized by the caller, as
+    // CandidateGenerator.updateEmbedding does. An id lives in exactly one bucket: the periodic item-embedding
+    // refresh calls this for every changed vector for the pod's lifetime, and appending without leaving the
+    // old bucket grew the bucket lists (and every query's candidate set) with uptime. The id joins its new
+    // bucket before leaving the old one, so a concurrent query never finds it in neither.
     public void add(int id, float[] vec) {
         long h = hash(vec);
+        Long previous = bucketOf.get(id);
+        if (previous != null && previous == h) return;   // already in the right bucket
         buckets.computeIfAbsent(h, k -> new CopyOnWriteArrayList<>()).add(id);
+        bucketOf.put(id, h);
+        if (previous != null) {
+            List<Integer> old = buckets.get(previous);
+            if (old != null) old.remove(Integer.valueOf(id));
+        }
+    }
+
+    /** Total ids across all buckets; with one entry per id this equals the number of distinct ids. */
+    int bucketEntryCount() {
+        return buckets.values().stream().mapToInt(List::size).sum();
     }
 
     long hash(float[] vec) {
@@ -69,7 +87,9 @@ public class EmbeddingLSH {
     private ConcurrentHashMap<Long, List<Integer>> buildBuckets(Map<Integer, float[]> embeddings) {
         ConcurrentHashMap<Long, List<Integer>> map = new ConcurrentHashMap<>();
         for (Map.Entry<Integer, float[]> e : embeddings.entrySet()) {
-            map.computeIfAbsent(hash(e.getValue()), k -> new CopyOnWriteArrayList<>()).add(e.getKey());
+            long h = hash(e.getValue());
+            map.computeIfAbsent(h, k -> new CopyOnWriteArrayList<>()).add(e.getKey());
+            bucketOf.put(e.getKey(), h);
         }
         return map;
     }

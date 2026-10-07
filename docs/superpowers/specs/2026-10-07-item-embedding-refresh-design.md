@@ -111,7 +111,10 @@ Index writes from the refresher and from `/setembedding` both go through the syn
 `CandidateGenerator.updateEmbedding`, so they never interleave. One race is accepted: the refresher
 reads `v1`, `/setembedding` writes `v2` to Redis and the index, the refresher then applies `v1`. The
 index regresses to `v1` until the next pass reads `v2` (last applied is `v1`, so it differs and is
-reapplied) — bounded by one interval, never permanent.
+reapplied) — bounded by one interval. (Corrected after review: because the diff is against what the
+refresher last applied rather than what memory holds, two rarer interleavings — a 6010 request-time
+cache-miss load landing after a refresh, and `/setembedding` with a TTL shorter than the interval —
+can leave a pod diverged until Redis changes again. See `02_Caching.md` §10.)
 
 Memory: the last-applied map holds one vector per catalog item (~2.5 MB at 10k items × 64 floats).
 Exact comparison was chosen over a hash so a collision can never silently skip an update.

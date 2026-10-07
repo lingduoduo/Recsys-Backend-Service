@@ -40,7 +40,9 @@ class ItemEmbeddingRefresherTest {
         Map<Integer, float[]> out = new HashMap<>();
         for (int id : ids) {
             if (corrupt.contains(id)) onCorrupt.accept(id);
-            else if (redis.containsKey(id)) out.put(id, redis.get(id));
+            // A fresh array per read, as RedisEmbeddingStore parses one per MGET: a same-instance fake
+            // would let a reference-equality diff pass every test while re-applying everything in production.
+            else if (redis.containsKey(id)) out.put(id, redis.get(id).clone());
         }
         return out;
     };
@@ -75,7 +77,7 @@ class ItemEmbeddingRefresherTest {
         // vectors every interval would grow the index file without bound.
         redis.put(1, A);
         redis.put(2, B);
-        ItemEmbeddingRefresher r = refresher(Map.of(1, A), recording);
+        ItemEmbeddingRefresher r = refresher(Map.of(1, A.clone()), recording);   // equal content, distinct array
 
         r.refreshOnce();   // id 2 is new relative to the seed -> applied once
         r.refreshOnce();   // nothing changed

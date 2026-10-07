@@ -28,7 +28,10 @@ import java.util.function.Supplier;
  *
  * <p>A catalog id absent from Redis keeps its current vector (keys evict and expire; absence is not
  * deletion). One accepted race with /setembedding: a pass that read v1 before /setembedding wrote v2
- * can re-apply v1 after it; the next pass reads v2 and repairs it, so it lasts at most one interval.
+ * can re-apply v1 after it; the next pass reads v2 and repairs it, so it lasts one interval. The diff
+ * is against what this refresher last applied, not against what memory holds, so a divergence it did
+ * not cause (a 6010 cache-miss load landing after a refresh; /setembedding with a TTL shorter than the
+ * interval) persists until Redis changes again — see 02_Caching §10.
  */
 public final class ItemEmbeddingRefresher implements AutoCloseable {
 

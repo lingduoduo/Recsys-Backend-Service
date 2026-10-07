@@ -92,6 +92,8 @@ public class RetrievalRecommendationController {
                 // service's readiness gate reads ONNX inference metrics, not these, so this cannot pull
                 // the pod out of rotation.
                 log.error("Redis fetch failed for embedding {}", key, e);
+                // Returned from inside the try, so the outer catch never classifies it: do it here.
+                timeout = isTimeout(e);
                 return Map.of("item", item, "embedding", List.of(), "degraded", true);
             }
             if (raw == null) {

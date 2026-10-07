@@ -249,8 +249,10 @@ By default the gateway data path wraps every upstream in a health-checked
 Armeria endpoint group
 ([`UpstreamEndpointGroups`](../../src/main/java/com/recsys/application/gateway/UpstreamEndpointGroups.java)):
 each backend is probed on an interval, and a backend that has never answered
-healthy is kept out of selection, so a request to it **fast-fails with `503`**
-instead of hanging until the timeout (`EmptyEndpointGroupException` →
+healthy is kept out of selection, so a request to it is
+answered `503` once the selection timeout expires — set to the response timeout
+(`GATEWAY_TIMEOUT_MS`), so this bounds the wait rather than shortening it
+(`EmptyEndpointGroupException` →
 `GatewayRequestForwarder.isNoHealthyEndpoint` → `503`). This gates **initial
 readiness only**: `allowEmptyEndpoints(false)` makes Armeria ignore an update that
 would empty the group, so a backend that goes unhealthy after it was ready stays

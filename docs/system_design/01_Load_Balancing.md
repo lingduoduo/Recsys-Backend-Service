@@ -155,7 +155,7 @@ as the unit under test for that routing logic.
   round-robin proxy standing in for kube-proxy: with recycling every pod receives requests,
   without it one pod takes everything, and a pod that turns unhealthy after startup stays
   selectable (in the `-Presilience` PR gate). `GatewayUpstreamHealthCheckIntegrationTest`
-  covers a never-healthy upstream fast-failing with `503`.
+  covers a never-healthy upstream being answered `503` within the selection timeout.
 
 ## Design specs & plans
 
@@ -209,7 +209,8 @@ model has none (it is a reference/test artifact, not a shipped feature).
    optionally weighted by `X-Capacity-Weight`) would bypass kube-proxy and therefore
    `PreferClose`, and would need same-AZ preference rebuilt in the gateway.
 7. **The gateway health check never drops a backend after startup.** It keeps a
-   never-ready backend out of selection (fast `503`), but `allowEmptyEndpoints(false)`
+   never-ready backend out of selection (`503` after the selection timeout, which equals
+   `GATEWAY_TIMEOUT_MS`), but `allowEmptyEndpoints(false)`
    makes Armeria ignore an update that would empty a one-endpoint group. Per-pod health
    is the readiness probe's job — deliberately; see
    [Connection pinning and recycling](#connection-pinning-and-recycling).

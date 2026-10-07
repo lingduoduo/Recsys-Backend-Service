@@ -4,6 +4,7 @@ import com.recsys.infrastructure.dataloading.DataManager;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
@@ -29,5 +30,13 @@ class CandidateGeneratorDimensionTest {
     void updateEmbedding_acceptsMatchingDimension() {
         assertThatCode(() -> generator.updateEmbedding(5, new float[]{0.1f, 0.3f, 0.6f, 0.0f, 0.0f, 0.0f}))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void seedEmbeddingsExposeTheClasspathVectorsReadOnly() {
+        assertThat(generator.seedEmbeddings()).isNotEmpty();
+        assertThat(generator.seedEmbeddings().values().iterator().next()).hasSize(generator.embeddingDimension());
+        assertThatThrownBy(() -> generator.seedEmbeddings().put(-1, new float[0]))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }

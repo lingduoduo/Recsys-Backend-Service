@@ -151,6 +151,11 @@ public class CandidateGenerator {
         embeddingIndex.addOrUpdate(id, vec);
     }
 
+    /** The classpath vectors the index was built from; read-only. */
+    public Map<Integer, float[]> seedEmbeddings() {
+        return Collections.unmodifiableMap(movieEmbeddings);
+    }
+
     /** Embedding dimension the index expects, or 0 if no seed embeddings were loaded. */
     public int embeddingDimension() {
         return embeddingDim;

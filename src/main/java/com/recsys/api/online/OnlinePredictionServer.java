@@ -31,6 +31,7 @@ import com.linecorp.armeria.server.metric.MetricCollectingService;
 import com.linecorp.armeria.server.metric.PrometheusExpositionService;
 import com.linecorp.armeria.common.metric.MeterIdPrefixFunction;
 import com.linecorp.armeria.common.metric.PrometheusMeterRegistries;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import com.recsys.infrastructure.dataloading.DataManager;
 import com.recsys.infrastructure.cache.LogicalExpiryEmbeddingCache;
@@ -74,6 +75,7 @@ import com.recsys.application.retrieval.coldstart.QuotaPolicy;
 import com.recsys.application.retrieval.multichannel.ChannelHealthMonitor;
 import com.recsys.application.retrieval.multichannel.MultiChannelRecallService;
 import com.recsys.application.retrieval.multichannel.RecallConfig;
+import com.recsys.application.retrieval.multichannel.RecallDegradationMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.List;
@@ -137,6 +139,19 @@ public final class OnlinePredictionServer {
             WorkerBulkhead recallBulkhead = new WorkerBulkhead("recall-online", recallPoolSize,
                     EnvConfig.readInt("RECALL_BULKHEAD_QUEUE_CAPACITY", recallPoolSize * 4));
             recallExecutor = recallBulkhead.asExecutorService();
+            PrometheusMeterRegistry registry = PrometheusMeterRegistries.defaultRegistry();
+            // Must be the first thing that touches this registry: a MeterFilter only applies to
+            // meters registered after it is installed, and SplunkHecMetrics.register(...) below
+            // registers real meters (FunctionCounters/Gauge) immediately whenever a SPLUNK
+            // appender is present, regardless of whether SPLUNK_HEC_TOKEN is set. Also covers
+            // JvmMetricsBinder.bindTo(...) below and the meterRegistry(registry).decorator(
+            // MetricCollectingService...) call further down, both of which register meters too.
+            // Any of these running first triggers a "MeterFilter configured after a Meter
+            // registered" WARN on every startup.
+            RequestDurationHistogram.configure(registry);
+            // Registered on the serving registry so degraded recalls reach /metrics; without it the recall
+            // service built a private instance nothing read.
+            RecallDegradationMetrics recallMetrics = createRecallMetrics(registry);
             MultiChannelRecallService recallService = MultiChannelRecallService.from(
                     RecallConfig.builder()
                             .channels(List.of(
@@ -151,17 +166,8 @@ public final class OnlinePredictionServer {
                             .executor(recallExecutor)
                             .faultInjector(FaultInjector.NOOP)
                             .userEmbeddingStore(userEmbCache)
+                            .recallMetrics(recallMetrics)
                             .build());
-            PrometheusMeterRegistry registry = PrometheusMeterRegistries.defaultRegistry();
-            // Must be the first thing that touches this registry: a MeterFilter only applies to
-            // meters registered after it is installed, and SplunkHecMetrics.register(...) below
-            // registers real meters (FunctionCounters/Gauge) immediately whenever a SPLUNK
-            // appender is present, regardless of whether SPLUNK_HEC_TOKEN is set. Also covers
-            // JvmMetricsBinder.bindTo(...) below and the meterRegistry(registry).decorator(
-            // MetricCollectingService...) call further down, both of which register meters too.
-            // Any of these running first triggers a "MeterFilter configured after a Meter
-            // registered" WARN on every startup.
-            RequestDurationHistogram.configure(registry);
             // The Splunk appender was built by Logback long before this registry existed, so it
             // cannot register itself. No-op when SPLUNK_HEC_TOKEN is unset.
             SplunkHecMetrics.register(registry);
@@ -344,6 +350,14 @@ public final class OnlinePredictionServer {
             if (jedisPool != null) jedisPool.close();
             throw e;
         }
+    }
+
+    // Mirrors RecSysServer.createRecallMetrics: only the fixed outcome dimension becomes a metric; channel
+    // names (including the cold-user probe's "user-embedding") stay in the in-process snapshot.
+    static RecallDegradationMetrics createRecallMetrics(MeterRegistry registry) {
+        RecallDegradationMetrics metrics = new RecallDegradationMetrics();
+        metrics.registerMetrics(registry);
+        return metrics;
     }
 
     static DurableConfig durableConfig(Map<String, String> env) {

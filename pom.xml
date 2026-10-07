@@ -395,6 +395,9 @@
                      the process with code 1 (both measured against a dead Redis port). Pure unit tests. -->
                 <include>**/application/online/OnlineRecommendationServiceTest.java</include>
                 <include>**/serving/RecSysServerRedisDownStartupTest.java</include>
+                <!-- 7010 must register recall-degradation outcomes on its serving registry; without it a
+                     degraded recall (incl. the Redis-down cold-user fallback) never reaches /metrics. -->
+                <include>**/online/OnlineRecallMetricsWiringTest.java</include>
                 <include>**/vectordb/MultiVectorMathTest.java</include>
                 <include>**/vectordb/ExactMultiVectorIndexTest.java</include>
                 <include>**/vectordb/CoRatedTokenBagsTest.java</include>

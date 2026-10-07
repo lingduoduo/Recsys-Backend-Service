@@ -152,8 +152,6 @@ public final class OnlinePredictionServer {
                             .faultInjector(FaultInjector.NOOP)
                             .userEmbeddingStore(userEmbCache)
                             .build());
-            OnlineRecommendationService recommendationService = new OnlineRecommendationService(
-                    dataManager, recallService, onlineFeatureStore, topkStore, onlineLearner);
             PrometheusMeterRegistry registry = PrometheusMeterRegistries.defaultRegistry();
             // Must be the first thing that touches this registry: a MeterFilter only applies to
             // meters registered after it is installed, and SplunkHecMetrics.register(...) below
@@ -174,6 +172,9 @@ public final class OnlinePredictionServer {
             GcEventTracker gcEventTracker = new GcEventTracker();
             gcEventTracker.start();
             Runtime.getRuntime().addShutdownHook(new Thread(gcEventTracker::stop));
+            // Built after RequestDurationHistogram.configure: it registers a counter on this registry.
+            OnlineRecommendationService recommendationService = new OnlineRecommendationService(
+                    dataManager, recallService, onlineFeatureStore, topkStore, onlineLearner, registry);
             RecommendationPaginationRuntime pagination =
                     RecommendationPaginationRuntime.fromEnvironment(
                             registry, Clock.systemUTC());

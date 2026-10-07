@@ -131,6 +131,9 @@ public class MultiChannelRecallService {
                 config.taskMetrics());
     }
 
+    /** Degraded-channel name reported when the cold-user probe's embedding read fails. */
+    static final String USER_EMBEDDING_PROBE = "user-embedding";
+
     public List<MovieCandidate> recall(RecommendationQuery query, int limit) {
         return recall(query, limit, false).candidates();
     }
@@ -153,6 +156,7 @@ public class MultiChannelRecallService {
         if (!primary) degradationMetrics.recordTotal();
 
         QuotaSpec quota = null;
+        RuntimeException probeFailure = null;
         if (userEmbeddingStore != null) {
             try {
                 int userId = Integer.parseInt(query.userId());
@@ -161,6 +165,14 @@ public class MultiChannelRecallService {
                 quota = isCold ? quotaPolicy.cold(limit) : quotaPolicy.warm(limit);
             } catch (NumberFormatException e) {
                 quota = quotaPolicy.cold(limit);
+            } catch (RuntimeException e) {
+                // The probe runs before any channel is dispatched, so a store failure here would escape
+                // every per-channel degradation layer (a cold-cache Redis outage 500'd the request).
+                // Off the primary path, an unknown embedding is answered as a cold user and reported as a
+                // degraded "user-embedding" channel; the primary path keeps propagating (read-your-writes).
+                if (primary) throw e;
+                quota = quotaPolicy.cold(limit);
+                probeFailure = e;
             }
         }
 
@@ -242,6 +254,13 @@ public class MultiChannelRecallService {
 
         Map<String, List<MovieCandidate>> channelResults = new LinkedHashMap<>();
         Set<String> degradedChannels = new LinkedHashSet<>();
+        if (probeFailure != null) {
+            degradationMetrics.record(USER_EMBEDDING_PROBE, RecallDegradationMetrics.classify(probeFailure));
+            degradedChannels.add(USER_EMBEDDING_PROBE);
+            log.warn("User-embedding probe failed, recalling as a cold user: {}",
+                    probeFailure.getMessage() != null ? probeFailure.getMessage()
+                            : probeFailure.getClass().getSimpleName());
+        }
         for (ChannelResult result : results) {
             if (result.error() != null) {
                 healthMonitor.recordFailure(result.channel());

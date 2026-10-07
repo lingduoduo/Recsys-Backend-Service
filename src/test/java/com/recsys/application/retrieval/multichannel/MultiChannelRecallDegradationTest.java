@@ -166,4 +166,46 @@ class MultiChannelRecallDegradationTest {
         }
         @Override public List<MovieCandidate> recallPrimary(RecommendationQuery q, int limit) { return recall(q, limit); }
     }
+
+    // The cold-user probe runs before any channel is dispatched, so a Redis failure there used to escape
+    // every degradation layer: the healthy channel was never consulted and the request 500'd.
+
+    private static MultiChannelRecallService withUserEmbeddings(
+            com.recsys.infrastructure.vectordb.EmbeddingStore userEmb, RecallDegradationMetrics metrics) {
+        return new MultiChannelRecallService(
+                List.of(new OkChannel()),
+                new ChannelHealthMonitor(),
+                java.util.concurrent.Executors.newFixedThreadPool(2),
+                200L, FaultInjector.NOOP, userEmb,
+                com.recsys.application.retrieval.coldstart.QuotaPolicy.defaultMovie(),
+                metrics);
+    }
+
+    @Test
+    void userEmbeddingProbeFailureTreatsUserAsColdAndStillServes() {
+        var userEmb = org.mockito.Mockito.mock(com.recsys.infrastructure.vectordb.EmbeddingStore.class);
+        org.mockito.Mockito.when(userEmb.getEmbedding(org.mockito.ArgumentMatchers.anyInt()))
+                .thenThrow(new io.lettuce.core.RedisConnectionException("redis down"));
+        RecallDegradationMetrics metrics = new RecallDegradationMetrics();
+
+        RecallResult result = withUserEmbeddings(userEmb, metrics).recallDetailed(query(), 10);
+
+        assertThat(result.candidates()).isNotEmpty(); // the healthy channel was consulted
+        assertThat(result.degradedChannels()).containsExactly("user-embedding");
+        assertThat(result.outcome()).isEqualTo(PARTIAL);
+        assertThat(metrics.snapshot().byChannel()).containsKey("user-embedding");
+        assertThat(metrics.snapshot().degradedRecalls()).isEqualTo(1);
+    }
+
+    @Test
+    void userEmbeddingProbeFailureOnThePrimaryPathStillPropagates() {
+        // Read-your-writes must not silently downgrade to a cold-user answer.
+        var userEmb = org.mockito.Mockito.mock(com.recsys.infrastructure.vectordb.EmbeddingStore.class);
+        org.mockito.Mockito.when(userEmb.getEmbeddingPrimary(org.mockito.ArgumentMatchers.anyInt()))
+                .thenThrow(new io.lettuce.core.RedisConnectionException("redis down"));
+
+        assertThatThrownBy(() -> withUserEmbeddings(userEmb, new RecallDegradationMetrics())
+                .recallPrimaryDetailed(query(), 10))
+                .isInstanceOf(io.lettuce.core.RedisConnectionException.class);
+    }
 }

@@ -13,6 +13,8 @@ import com.recsys.application.online.OnlineLearner;
 import com.recsys.infrastructure.store.RecentHistoryStore;
 import com.recsys.infrastructure.store.TrendingStore;
 import com.recsys.application.retrieval.multichannel.MultiChannelRecallService;
+import io.lettuce.core.RedisConnectionException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -185,5 +187,76 @@ class OnlineRecommendationServiceTest {
         verify(recentHistoryStore, never()).getRecentMovieIds(eq(USER.userId()), anyInt());
         verify(topkStore, never()).getTopKIds(eq("last_hour"), anyInt());
         verify(recallService, never()).recall(any(RecommendationQuery.class), anyInt());
+    }
+
+    // --- Redis down on a cold cache: the two snapshot reads outside the recall fan-out must degrade,
+    // not 500. Before this change both propagated (measured: HTTP 500 with /health/ready 200).
+
+    private SimpleMeterRegistry degradedReadsRegistry() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        service = new OnlineRecommendationService(
+                dataManager, recallService, recentHistoryStore, topkStore, onlineLearner, registry);
+        return registry;
+    }
+
+    private static double degradedReads(SimpleMeterRegistry registry, String read) {
+        var counter = registry.find("online_recommendation_degraded_reads_total").tag("read", read).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    @Test
+    void recentHistoryReadFailureDegradesToNoExclusions() {
+        SimpleMeterRegistry registry = degradedReadsRegistry();
+        when(recentHistoryStore.getRecentMovieIds(eq(USER.userId()), anyInt()))
+                .thenThrow(new RedisConnectionException("redis down"));
+        when(recallService.recall(any(RecommendationQuery.class), anyInt()))
+                .thenReturn(List.of(cand(5, 0.9), cand(4, 0.7)));
+
+        OnlineRecommendationResult result =
+                service.recommend(new OnlineRecommendationRequest(USER.userId(), "last_hour", 2));
+
+        assertEquals(List.of(5, 4), result.recommendations().stream().map(Movie::id).toList());
+        assertTrue(result.recentMovies().isEmpty(), "no recent history is known while Redis is down");
+        assertEquals(1.0, degradedReads(registry, "recent_history"));
+    }
+
+    @Test
+    void trendingReadFailureDegradesToEmptyTrending() {
+        SimpleMeterRegistry registry = degradedReadsRegistry();
+        when(topkStore.getTopKIds(eq("last_hour"), anyInt())).thenThrow(new RedisConnectionException("redis down"));
+        when(recallService.recall(any(RecommendationQuery.class), anyInt()))
+                .thenReturn(List.of(cand(5, 0.9)));
+
+        OnlineRecommendationResult result =
+                service.recommend(new OnlineRecommendationRequest(USER.userId(), "last_hour", 1));
+
+        assertEquals(List.of(5), result.recommendations().stream().map(Movie::id).toList());
+        assertTrue(result.trendingMovies().isEmpty());
+        assertEquals(1.0, degradedReads(registry, "trending"));
+    }
+
+    @Test
+    void bothSnapshotReadsFailingWithEmptyRecallYieldsAnEmptyAnswerNotAnError() {
+        degradedReadsRegistry();
+        when(recentHistoryStore.getRecentMovieIds(eq(USER.userId()), anyInt()))
+                .thenThrow(new RedisConnectionException("redis down"));
+        when(topkStore.getTopKIds(eq("last_hour"), anyInt())).thenThrow(new RedisConnectionException("redis down"));
+        when(recallService.recall(any(RecommendationQuery.class), anyInt())).thenReturn(List.of());
+
+        OnlineRecommendationResult result =
+                service.recommend(new OnlineRecommendationRequest(USER.userId(), "last_hour", 2));
+
+        assertTrue(result.recommendations().isEmpty());
+    }
+
+    @Test
+    void primaryReadStillFailsLoudlyWhenRedisIsDown() {
+        // Read-your-writes: the primary path answers 503 + Retry-After by contract, never a degraded guess.
+        degradedReadsRegistry();
+        when(recentHistoryStore.getRecentMovieIdsPrimary(eq(USER.userId()), anyInt()))
+                .thenThrow(new RedisConnectionException("redis down"));
+
+        assertThrows(OnlineRecommendationService.PrimaryReadUnavailableException.class,
+                () -> service.recommendPrimary(new OnlineRecommendationRequest(USER.userId(), "last_hour", 2)));
     }
 }

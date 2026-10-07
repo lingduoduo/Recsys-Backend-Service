@@ -170,8 +170,8 @@ That section owns the sharding consequence; this one owns the mechanism.
   `GET /api/catalog/similar` (5 min / 1 h SIE) are cached; everything else is
   `CachingDisabled` / `no-store`. Invalidation is operator-triggered, not wired
   into writes.
-- Cloud Map JVM DNS cache capped at 30 s for blue/green cutover — but **only if
-  `networkaddress.cache.ttl` is not already set** (else unbounded).
+- Gateway upstream DNS answers are cached for the record's TTL by Armeria's resolver;
+  the JDK `networkaddress.cache.ttl=30` the gateway sets does not apply to them.
 
 ### 3d. Streaming feature pipeline
 
@@ -226,8 +226,9 @@ audit:
    Armeria health-checks (~10 s, drops from LB) vs. registry TTL (~20–40 s). If
    the registry static fallback points at the same down host, only the
    health-check path restores availability.
-6. **Cloud Map DNS staleness is unbounded if `networkaddress.cache.ttl` is
-   pre-set** — the gateway caps it to 30 s only when not already configured.
+6. **Upstream DNS staleness is bounded by the record's TTL, not the JVM setting** —
+   Armeria never reads `networkaddress.cache.ttl`, so presetting it changes nothing for
+   upstreams; a long record TTL (Armeria sets no max) is what would delay a cutover.
 7. **Record-store key format is per generation.** A single-shard write is atomic, but a
    generation created before the atomic-write change keeps the untagged key format for its
    whole life; only a reshard moves a deployment onto the tagged format. During the 24 h

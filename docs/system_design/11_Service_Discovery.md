@@ -15,7 +15,7 @@ each answering a different question:
 | Layer | Question it answers | Default behavior |
 |---|---|---|
 | Route table / registry | **Which address?** (`host:port`) | Static route address; optionally overridden by the registry |
-| Cloud Map DNS | **Which IP?** for that host | Armeria resolves per-connection under a 30 s DNS TTL |
+| DNS | **Which IP?** for that host | Armeria resolves per connection, caching by the record's TTL |
 | Health-checked endpoint group | **Is it selectable?** | A never-ready upstream stays out → `503` within the selection timeout (initial readiness only) |
 
 The registry decides the *address*, DNS decides the *IP*, and the health check
@@ -115,11 +115,18 @@ export SERVICE_REGISTRY_ADVERTISE_URL=http://10.0.1.5:6010
 Whatever host the route table or registry resolves to still has to become an IP and
 prove it's alive:
 
-- **Cloud Map DNS (30 s TTL)** —
+- **DNS — the record's TTL, not the JVM's** — the gateway's upstream clients resolve
+  with Armeria's own Netty DNS resolver, which caches each answer for the DNS record's
+  TTL (Armeria defaults: min 1 s, no max). It never reads the JDK's
+  `networkaddress.cache.ttl`, so the `=30` that
   [`MicroserviceGatewayServer`](../../src/main/java/com/recsys/api/gateway/MicroserviceGatewayServer.java)
-  sets the JVM `networkaddress.cache.ttl=30` (only if unset), so EKS blue/green
-  Cloud Map endpoint changes actually propagate — otherwise the JVM caches DNS
-  lookups indefinitely and would pin traffic to retired pods.
+  sets (only if unset) bounds only JDK-resolver users, not upstream routing. Measured
+  2026-10-06 with a fake DNS server and the property at 30 s: a 2 s record gave one lookup
+  per ~2 s, a 60 s record one lookup in 10 s; pinned by `UpstreamDnsTtlTest`. In EKS the
+  upstreams are ClusterIP names — stable VIPs, so a cached answer is never stale in a way
+  that matters — and the gateway does not resolve the Cloud Map `*.recsys.internal`
+  names at all; they serve callers outside the cluster. Anything that *does* resolve
+  Cloud Map names with Armeria sees cutover within the Cloud Map record's TTL.
 - **Health-checked endpoint groups** —
   [`UpstreamEndpointGroups`](../../src/main/java/com/recsys/application/gateway/UpstreamEndpointGroups.java)
   builds one Armeria `EndpointGroup` per unique `(protocol, host, port, healthPath)`
@@ -135,8 +142,8 @@ prove it's alive:
   [Fault Tolerance investigation](18_Fault_Tolerance.md#4-dependency-resilience--surviving-a-sick-downstream).
 
 So the layers compose cleanly: the registry (or static table) picks the address,
-Armeria's per-connection resolver turns it into an IP under the 30 s Cloud Map
-cache, and the health check decides whether that endpoint is eligible.
+Armeria's per-connection resolver turns it into an IP, cached for the record's TTL,
+and the health check decides whether that endpoint is eligible.
 
 Health probes use **GET** explicitly. Catalog and online health handlers are
 GET-only and reject HEAD with 405; relying on Armeria's default HEAD probe

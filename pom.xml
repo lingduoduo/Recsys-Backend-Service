@@ -365,6 +365,11 @@
                      pod and scale-out adds pods that get no gateway traffic. Measured: 4096/4096
                      requests on one of four pods. Local sockets only; polls with a generous deadline. -->
                 <include>**/gateway/UpstreamSelectionTest.java</include>
+                <!-- Upstream DNS answers are cached for the record's TTL by Armeria's own resolver, which
+                     never reads the networkaddress.cache.ttl=30 the gateway sets. The docs describe
+                     cutover timing in those terms; if an Armeria upgrade started honouring the JDK cache
+                     (or a resolver change pinned answers), they would be wrong. Fake DNS on loopback. -->
+                <include>**/gateway/UpstreamDnsTtlTest.java</include>
                 <!-- Liveness must not depend on upstreams, or an upstream outage restarts every
                      gateway pod. The load-bearing case here is the origin secret: it is the only
                      server-wide decorator that can reject, it is enabled wherever the CDN is, and

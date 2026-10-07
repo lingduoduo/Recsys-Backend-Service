@@ -34,8 +34,9 @@ The bootstrap wiring, decorator order, and shutdown hook live in
 [`MicroserviceGatewayServer`](../../src/main/java/com/recsys/api/gateway/MicroserviceGatewayServer.java)
 (LLM routes and the canonical `/api/recommend` are registered *before* the catch-all
 `prefix:/` so Armeria's more-specific match wins). Key knobs: `GATEWAY_PORT` (8010),
-`GATEWAY_TIMEOUT_MS` (3000), and `networkaddress.cache.ttl=30` for Cloud Map
-blue/green.
+`GATEWAY_TIMEOUT_MS` (3000). The gateway also sets the JDK's `networkaddress.cache.ttl=30`,
+but that does **not** govern upstream resolution: Armeria's DNS resolver caches by the
+record's TTL and never reads it (see [Service Discovery](11_Service_Discovery.md)).
 
 ## 1. Routing and prefix-strip
 

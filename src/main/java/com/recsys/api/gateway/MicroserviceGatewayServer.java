@@ -51,7 +51,7 @@ public final class MicroserviceGatewayServer {
     private static final Logger log = LoggerFactory.getLogger(MicroserviceGatewayServer.class);
     private static final int DEFAULT_PORT = 8010;
     private static final Set<String> LLM_ROUTE_NAMES = Set.of("llm", "llm-explanation");
-    // Cloud Map DNS TTL is 15–30 s. Cap the JVM cache so Blue/Green endpoint changes propagate.
+    // JDK address-cache TTL; see the comment where it is applied — it does not govern upstream DNS.
     private static final String CLOUD_MAP_DNS_TTL_SECONDS = "30";
 
     private MicroserviceGatewayServer() {}
@@ -62,9 +62,11 @@ public final class MicroserviceGatewayServer {
         Duration timeout = Duration.ofMillis(timeoutMs);
         List<MicroserviceRoute> allRoutes = MicroserviceRoute.defaults();
 
-        // Respect Cloud Map DNS TTL. The JVM caches successful lookups indefinitely by default,
-        // which prevents new Cloud Map endpoint registrations from being picked up during
-        // blue/green deployments. Only set if the caller hasn't already configured it.
+        // Caps the JDK's InetAddress cache at 30 s (only if the caller hasn't configured it). This does
+        // NOT govern the gateway's upstream clients: Armeria resolves with its own Netty DNS resolver,
+        // which caches each answer for the DNS record's TTL and never reads this property — pinned by
+        // UpstreamDnsTtlTest. In-cluster upstreams are ClusterIP names (stable VIPs), so their cache
+        // age does not affect routing anyway. Kept as a harmless bound for any JDK-resolver user.
         if (java.security.Security.getProperty("networkaddress.cache.ttl") == null) {
             java.security.Security.setProperty("networkaddress.cache.ttl", CLOUD_MAP_DNS_TTL_SECONDS);
         }

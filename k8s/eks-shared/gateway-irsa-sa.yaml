@@ -8,9 +8,9 @@
 # and blue/green cutover, and deliberately does not use it in-cluster, because Cloud Map DNS is
 # topology-blind and would push these calls across AZs. Plain name resolution needs no IAM either way,
 # and the gateway does not resolve those Cloud Map names at all. And the "30 s Cloud Map DNS
-# TTL" in CLAUDE.md is really a client-side setting the gateway applies to itself — it caps the JVM's
-# own address cache (networkaddress.cache.ttl, MicroserviceGatewayServer.java:46-61) so blue/green
-# endpoint changes propagate. It is not a TTL Cloud Map grants, and nothing about it involves IAM.
+# TTL" in CLAUDE.md is a JDK setting (networkaddress.cache.ttl) the gateway applies to itself; it
+# does not even govern the gateway's upstream lookups — Armeria caches by the DNS record's TTL
+# (UpstreamDnsTtlTest). It is not a TTL Cloud Map grants, and nothing about it involves IAM.
 #
 # This file previously asked for servicediscovery:GetService / ListInstances and
 # route53:ChangeResourceRecordSets / ListHostedZones / ListResourceRecordSets. The Route 53 entries

@@ -528,6 +528,27 @@ the same dead Redis port, 6010 now boots in ~4 s and answers `/getrecommendation
 step skipped at boot is not retried until the next restart. Pinned by
 `RecSysServerRedisDownStartupTest` (in the `-Presilience` gate).
 
+### The other two services
+
+Measured the same way on 2026-10-07 (dead Redis port, user 123):
+
+- **8080, model path** (`POST /api/v1/recommend`) — `200` with real recommendations and no Redis
+  error in the log: the ONNX path does not read Redis for a request.
+- **8080, retrieval path** (`/api/v1/retrieval/recommend/{user}`, `/embedding/{item}`) — always
+  answered `200` with an empty result, but **silently**: `HybridRecommendationService` swallowed
+  the failure at its hydration and popularity-fetch stages, and the embedding route set
+  `error = false`. An outage was therefore indistinguishable from "nothing to recommend" / "no such
+  embedding", and `recommendation_request_errors_total` never moved. Since 2026-10-07 both routes
+  add `"degraded": true` to the body and count the request as an error (measured: 2 requests → 2 per
+  endpoint; on `main` the series never appeared). This cannot cascade into a rolling restart:
+  8080's readiness failure-rate gate reads `InferenceMetricsService` (ONNX inference), not these
+  counters — `/health/ready` stayed `200` throughout. Pinned by `HybridRecommendationServiceTest`
+  and `RetrievalRecommendationControllerTest`.
+- **Gateway** (registry enabled) — boots; the registry refresh fails with "keeping last-good
+  snapshot" and routing falls back to the static addresses, as documented in
+  [11_Service_Discovery](11_Service_Discovery.md). With the registry off (the default) it opens no
+  Redis connection at all.
+
 ## 10. Per-object inventory — what each cached thing actually gets
 
 The class table in "The big picture" says what each cache *can* do. This says what each cached

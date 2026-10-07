@@ -398,6 +398,11 @@
                 <!-- 7010 must register recall-degradation outcomes on its serving registry; without it a
                      degraded recall (incl. the Redis-down cold-user fallback) never reaches /metrics. -->
                 <include>**/online/OnlineRecallMetricsWiringTest.java</include>
+                <!-- 8080's retrieval routes degrade to an empty 200 when Redis is down; these pin that the
+                     answer says "degraded": true and the request counts as an error, so an outage cannot
+                     masquerade as "nothing to recommend" or as success on the error dashboards. -->
+                <include>**/retrieval/service/HybridRecommendationServiceTest.java</include>
+                <include>**/rest/retrieval/RetrievalRecommendationControllerTest.java</include>
                 <include>**/vectordb/MultiVectorMathTest.java</include>
                 <include>**/vectordb/ExactMultiVectorIndexTest.java</include>
                 <include>**/vectordb/CoRatedTokenBagsTest.java</include>

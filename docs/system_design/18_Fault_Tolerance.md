@@ -204,9 +204,11 @@ occupancy, and it is capped in a different place for each of the three recall se
 [`RecallDegradationMetrics`](../../src/main/java/com/recsys/application/retrieval/multichannel/RecallDegradationMetrics.java)
 classifies failures (REJECTED / TIMEOUT / ERROR), tracks
 `degradedRatio = degradedRecalls / totalRecalls`, and records four bounded
-outcomes. `GET /health/load` retains per-channel operational detail;
+outcomes. `GET /health/load` retains per-channel operational detail (6010);
 Prometheus exposes `recsys_recall_degradation_outcomes_total` with only the
-bounded `outcome` tag:
+bounded `outcome` tag, on both 6010 and 7010 (7010 since 2026-10-07 — before that
+its recall service kept an unregistered instance, so its degraded recalls never
+reached `/metrics`):
 
 | Outcome | `X-Recall-Degradation-Reason` | Meaning |
 |---|---|---|

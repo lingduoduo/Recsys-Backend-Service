@@ -486,10 +486,15 @@ fixed:  attempt 1: HTTP 200  {"user":{"userId":123,…},"recentMovies":[],"trend
 ```
 
 Global popularity still answers from its `DataManager` pool, which is why a cold user gets real
-recommendations rather than an empty list. One residual: 7010 never registers
-`RecallDegradationMetrics` on its Prometheus registry (6010 does), so the `user-embedding`
-degradation is visible there only in the log. Pinned by `OnlineRecommendationServiceTest` and
-`MultiChannelRecallDegradationTest`, both in the `-Presilience` gate.
+recommendations rather than an empty list. The cold-user fallback surfaces as
+`recsys_recall_degradation_outcomes_total{outcome="partial"}` on both 6010 and 7010 (7010 only
+registered it from 2026-10-07; before that its recall service kept a private, unexported
+instance). The channel name `user-embedding` is deliberately never a metric tag on either service
+— it lives in the in-process snapshot and the WARN log. Re-measured on 7010 with Redis dead:
+two requests → `outcome="partial"` 2, `degraded_reads{read="recent_history"}` 2,
+`{read="trending"}` 2. Pinned by `OnlineRecommendationServiceTest`,
+`MultiChannelRecallDegradationTest` and `OnlineRecallMetricsWiringTest`, all in the
+`-Presilience` gate.
 
 Note the last line of the original measurement above. **Readiness stays green while the main route returns 500**, because
 `OnlineHealthService` reports process and load-shedder state rather than dependency health, so
@@ -612,8 +617,9 @@ variant. An empty Redis is a supported state. An *unreachable* one, on a cold JV
    pre-fan-out reads in `OnlineRecommendationService.recommend` turned that into an HTTP 500
    with readiness still green (§9, measured). **Resolved 2026-10-07** — each read now has an
    explicit degraded answer on the replica path (empty history, cold user, empty trending);
-   the primary path still fails loudly by contract. Residual: 7010 does not export
-   `RecallDegradationMetrics`, so the cold-user fallback is log-only there.
+   the primary path still fails loudly by contract. Each fallback is countable on 7010's
+   `/metrics` — `online_recommendation_degraded_reads_total{read}` and
+   `recsys_recall_degradation_outcomes_total{outcome="partial"}`.
 4. **LLM caching assumes determinism.** Caching a model's output is only sound because the
    demo runs at temperature 0; a nonzero-temperature deployment would serve one sampled
    answer for all identical prompts.

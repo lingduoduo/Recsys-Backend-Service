@@ -468,4 +468,19 @@ class RetrievalRecommendationControllerTest {
             .andExpect(jsonPath("$.degraded").value(true));
         verify(measurementService).recordRequest(eq("recommend"), any(Duration.class), eq(true), eq(false));
     }
+
+    @Test
+    void embeddingRedisTimeoutIsCountedAsATimeoutToo() throws Exception {
+        // The degraded path returns from inside the try, so the outer catch that classifies timeouts never
+        // runs; a Redis command timeout must still reach recommendation.request.timeouts.
+        ValueOperations<String, String> ops = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(ops);
+        when(ops.get(anyString()))
+            .thenThrow(new org.springframework.dao.QueryTimeoutException("Redis command timed out"));
+
+        mockMvc.perform(get("/api/v1/retrieval/embedding/item1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.degraded").value(true));
+        verify(measurementService).recordRequest(eq("embedding"), any(Duration.class), eq(true), eq(true));
+    }
 }

@@ -116,6 +116,7 @@ That section owns the sharding consequence; this one owns the mechanism.
 | OnlineFeatureStore (recent history) | 5 s fresh / **60 s** serve-stale-on-error | "5 s stale imperceptible to rec quality" |
 | ShardedTopKStore (trending) | 2 s fresh / 60 s stale | `getTopKIdsPrimary` reads primary |
 | LogicalExpiryEmbeddingCache (`u2vEmb`) | **30 s** soft TTL | write-through on `setEmbedding`; Flink rewrites land "within ~1 soft TTL" |
+| Item embeddings (`i2vEmb`) in recall + `/similar` | **one refresh interval** (60 s, `ITEM_EMBEDDING_REFRESH_INTERVAL_MS`) | diff-applied by `ItemEmbeddingRefresher`; a failed pass keeps the in-memory copy (staleness grows, `RecsysLoopStale` at 300 s) |
 | RecommendationCache (recs / cold-start) | **300 s** / **3600 s** | keyed by variant+modelVersion → deploy sidesteps stale |
 | LlmResponseCache | 300 s | justified by temperature=0 determinism |
 | CDN `/api/catalog/item` | 1 h fresh / **24 h** stale-if-error | operator wildcard invalidation only |

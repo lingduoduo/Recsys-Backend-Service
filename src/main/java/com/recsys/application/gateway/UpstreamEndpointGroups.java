@@ -30,7 +30,8 @@ import java.util.function.Function;
  * {@link HealthCheckedEndpointGroup} over a static {@link Endpoint}, so an upstream that is not yet healthy
  * is kept out of selection and requests fast-fail instead of hanging (initial readiness only — see
  * {@code buildGroup}). Host resolution stays with Armeria's default per-connection resolver (unchanged from
- * the previous plain-{@code WebClient} behavior, honoring the 30 s Cloud Map DNS cache).
+ * the previous plain-{@code WebClient} behavior), which caches answers for the DNS record's TTL and ignores
+ * the JDK's {@code networkaddress.cache.ttl} — pinned by {@code UpstreamDnsTtlTest}.
  *
  * <p>The endpoint is a Service address, so which pod serves a request is kube-proxy's choice, made once per
  * connection. The caller-owned {@link ClientFactory} recycles connections after

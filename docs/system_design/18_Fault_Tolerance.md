@@ -260,7 +260,8 @@ selectable (measured 2026-10-06). That is deliberate — the endpoint is a Servi
 address, so per-pod health belongs to the readiness probe; see
 [Load Balancing](01_Load_Balancing.md#connection-pinning-and-recycling). A single IOException is
 retried once after 50 ms (max 2 attempts, never on socket timeout). Host
-resolution and the 30 s Cloud Map DNS cache are unchanged.
+resolution is unchanged (Armeria's DNS resolver, cached by the record's TTL — see
+[Service Discovery](11_Service_Discovery.md)).
 
 The probe is a **`GET`** (`useGet(true)`), not Armeria's default `HEAD`. The
 catalog and online health handlers are `BaseApiService` subclasses that override

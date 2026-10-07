@@ -1,7 +1,7 @@
 # Caching in Recsys-Backend-Service
 
 An investigation of the caching layers that keep the recommendation hot path fast: a
-three-tier embedding cache, a soft-TTL cache that serves stale while it refreshes, a
+heap embedding cache in front of Redis, a soft-TTL cache that serves stale while it refreshes, a
 generic single-flight snapshot cache, and result caches for recommendations and LLM
 responses. The recurring discipline is the same everywhere — **bounded, single-flight,
 serve-stale-on-error, and keyed so a deploy sidesteps stale data**.
@@ -33,7 +33,6 @@ The caches:
 
 | Cache | Caches | Expiry strategy | Bound |
 |---|---|---|---|
-| `MultiLevelEmbeddingCache` | **nothing — unwired**, see §1 | L1 no-TTL + null sentinel; L2/L3 fallthrough | L1 = 10,000 entries; sentinels = `EMBEDDING_NULL_SENTINEL_MAX_ENTRIES` |
 | `LocalEmbeddingCache` | embeddings (L2 local) | access-order LRU | `LOCAL_EMBEDDING_CACHE_MAX_ENTRIES` (100,000) |
 | `LogicalExpiryEmbeddingCache` | user embeddings (`u2vEmb`) | **soft** TTL (~30 s) + serve-stale + 1 refresh | `LOGICAL_EXPIRY_CACHE_MAX_ENTRIES` (10,000) |
 | `TtlSingleFlightCache<V>` | any snapshot | fresh 1 s / stale 60 s + single-flight | per-key |
@@ -46,29 +45,10 @@ The caches:
 
 Embeddings are read on every recall, so they get the most cache machinery.
 
-**`MultiLevelEmbeddingCache`** ([infrastructure/cache/MultiLevelEmbeddingCache.java](../../src/main/java/com/recsys/infrastructure/cache/MultiLevelEmbeddingCache.java))
-is an explicit three-tier cache — and it is **wired into no service**. Outside its own file
-and its unit test the class has zero references: the only `new MultiLevelEmbeddingCache(...)`
-in the repository is inside its own builder, and nothing calls that builder. Read the tier
-description below as a design sketch, not as deployed behavior. **In particular, its L3
-file-system snapshot is not a Redis-outage defense that exists** — no running service has an
-L3 tier, so nothing falls back to a snapshot when Redis is unavailable. What actually happens
-in that case is §9. The tiers, as designed:
-
-- **L1** — a JVM `ConcurrentHashMap` bounded at `DEFAULT_L1_CAPACITY = 10_000`, **no TTL**
-  (entries live until eviction or restart). An L2 hit is **promoted** to L1 only if the
-  `HotKeyDetector` says the key is hot — so L1 holds the genuinely hot IDs, not everything.
-- **L2** — any `EmbeddingStore` (typically Redis / `LocalEmbeddingCache` → Redis). L2
-  exceptions are caught and logged, and execution **falls through to L3** (graceful
-  degradation, not an error).
-- **L3** — an optional file-system snapshot fallback (may be `null`), used only when L2 is
-  unavailable, which *would* let a Redis outage still serve embeddings from the snapshot if
-  this class were wired anywhere.
-
-`setEmbedding` is **write-through** to L1 + L2 (L3 writes are attempted and swallowed).
-A **null sentinel** (30 s TTL) absorbs repeated misses for genuinely-absent IDs so they
-don't re-hit L2/L3 every request, and per-tier hit counters (`l1Hits`/`l2Hits`/`l3Hits`/
-`misses`) make abnormal L3 traffic (a Redis problem) observable.
+There used to be a third, explicit three-tier class here — `MultiLevelEmbeddingCache` (heap L1 with
+hot-key promotion, L2 store, L3 file-system snapshot). It was wired into no service, so its L3
+"Redis-outage defense" never existed in any running process, and it was **deleted on 2026-10-07**
+rather than left documented as if it did. What actually happens when Redis is unavailable is §9.
 
 **`LocalEmbeddingCache`** ([infrastructure/cache/LocalEmbeddingCache.java](../../src/main/java/com/recsys/infrastructure/cache/LocalEmbeddingCache.java))
 is the cache actually wired in production — a Caffeine JVM-heap cache in front of Redis
@@ -76,9 +56,8 @@ is the cache actually wired in production — a Caffeine JVM-heap cache in front
 cache-penetration defenses: a **Bloom filter** guard (after warm-up, `mightContain==false`
 short-circuits the Redis round-trip for known-absent IDs), a bounded **null-sentinel**
 cache (100k, 30 s), and **single-flight** miss loading (2 s wait). `warmUp()` bulk-loads
-from Redis and `preload()` seeds from the classpath. (`MultiLevelEmbeddingCache` above is
-the *explicit-tier* design; in production the "multi-level" shape is realized by
-`LocalEmbeddingCache` → Redis.)
+from Redis and `preload()` seeds from the classpath. The production "multi-level" shape is
+`LocalEmbeddingCache` (heap) → Redis.
 
 **`LogicalExpiryEmbeddingCache`** ([infrastructure/cache/LogicalExpiryEmbeddingCache.java](../../src/main/java/com/recsys/infrastructure/cache/LogicalExpiryEmbeddingCache.java))
 solves the hot-key TTL stampede a different way: it embeds a **soft (logical) expiry**
@@ -89,12 +68,15 @@ the herd never forms. Refreshes (and cold misses) are deduped per ID via a `refr
 map. Used for user embeddings (`u2vEmb`, ~30 s soft TTL — see the staleness table in
 [15_Eventual_Consistency](15_Eventual_Consistency.md)).
 
-**Every embedding-cache tier is size-bounded** (since 2026-07-28). `LocalEmbeddingCache`
-(`LOCAL_EMBEDDING_CACHE_MAX_ENTRIES`, default 100,000), `LogicalExpiryEmbeddingCache`
-(`LOGICAL_EXPIRY_CACHE_MAX_ENTRIES`, default 10,000) and both negative caches of
-confirmed-absent IDs (`EMBEDDING_NULL_SENTINEL_MAX_ENTRIES`, default 10,000) use Caffeine
-`maximumSize`, so a sweep over many distinct or absent IDs cannot grow the heap without
-limit.
+**Every embedding-cache tier is size-bounded** (since 2026-07-28). Values:
+`LocalEmbeddingCache` (`LOCAL_EMBEDDING_CACHE_MAX_ENTRIES`, default 100,000) and
+`LogicalExpiryEmbeddingCache` (`LOGICAL_EXPIRY_CACHE_MAX_ENTRIES`, default 10,000). Negative caches
+of confirmed-absent IDs are bounded per class, with no shared knob: `LocalEmbeddingCache`'s at a
+hard-coded `NULL_SENTINEL_MAX = 100_000`, and `LogicalExpiryEmbeddingCache`'s sentinel and
+refresh-guard maps by the same `LOGICAL_EXPIRY_CACHE_MAX_ENTRIES` as its values. All use Caffeine
+`maximumSize`, so a sweep over many distinct or absent IDs cannot grow the heap without limit.
+(`EMBEDDING_NULL_SENTINEL_MAX_ENTRIES` was read only by the deleted `MultiLevelEmbeddingCache`; it
+configures nothing.)
 
 One deliberate asymmetry: the sentinel and refresh-guard maps also carry
 `expireAfterWrite`, but `LogicalExpiryEmbeddingCache`'s *value* map is bounded by **size
@@ -147,9 +129,10 @@ streaming-vs-buffered behavior is owned by [SSE Streaming](16_SSE_Streaming.md).
 
 ## 5. Supporting machinery
 
-- **`HotKeyDetector`** — a lock-free two-bucket, alpha-weighted sliding window that
-  decides which IDs are hot enough to promote into L1 (and gates eviction). It's the
-  promotion policy for `MultiLevelEmbeddingCache`.
+- **`HotKeyDetector`** — a lock-free two-bucket, alpha-weighted sliding window over key
+  access frequency. Its one consumer is `ShardedTopKStore`, which uses it to expose which
+  trending windows are hot (it was also the L1 promotion policy of the deleted
+  `MultiLevelEmbeddingCache`).
 - **`SingleFlight`** ([infrastructure/resilience/SingleFlight.java](../../src/main/java/com/recsys/infrastructure/resilience/SingleFlight.java))
   — the general dedup primitive behind the caches; on a wait timeout it fails open to an
   independent compute rather than blocking ([18_Fault_Tolerance](18_Fault_Tolerance.md#redis-resilience)).
@@ -163,7 +146,7 @@ streaming-vs-buffered behavior is owned by [SSE Streaming](16_SSE_Streaming.md).
 
 The one meaningful axis of difference is **write-through vs TTL-only**:
 
-- **Write-through (invalidate on write)** — `MultiLevelEmbeddingCache.setEmbedding` and
+- **Write-through (invalidate on write)** — `LocalEmbeddingCache` (via `/setembedding`) and
   `LogicalExpiryEmbeddingCache` update on the write path, and the CDN has manual operator
   invalidation. These are the caches where a same-version data change is reflected
   promptly.
@@ -175,8 +158,7 @@ The one meaningful axis of difference is **write-through vs TTL-only**:
 
 ## 7. Testing
 
-- **Embedding caches** — `MultiLevelEmbeddingCacheTest` (tier promotion, L2→L3
-  fallthrough, null sentinel), `LocalEmbeddingCacheTest` (LRU, batch dedup),
+- **Embedding caches** — `LocalEmbeddingCacheTest` (LRU, batch dedup),
   `LogicalExpiryEmbeddingCacheTest` (soft-expiry serve-stale + single refresh).
 - **Generic** — `TtlSingleFlightCacheTest` (fresh/stale/cold paths, serve-stale-on-error,
   coalescing).
@@ -609,7 +591,7 @@ reaches the same answer through its null-sentinel cache, one Redis miss per 30 s
 describes. The two interact badly in exactly one place: 7010's `LogicalExpiryEmbeddingCache`
 has neither a classpath preload nor a Bloom filter, so on a new pod every user is a cold miss
 that reaches Redis, whereas 6010's cache starts pre-populated from the classpath. Same logical
-object, same nominal "three-tier embedding cache" description. Until 2026-10-07 only 6010 survived
+object, two different caches in front of it. Until 2026-10-07 only 6010 survived
 a Redis outage in its first seconds of life; 7010 now answers such a user as a cold user (§9).
 
 A third sense is worth separating out because it *is* handled: a **cold Redis**.
@@ -624,13 +606,11 @@ variant. An empty Redis is a supported state. An *unreachable* one, on a cold JV
    caches (and manual CDN purges) reflect a same-version change promptly; everything else
    serves stale up to its TTL. Version keying, not invalidation, is what keeps result
    caches correct across deploys.
-2. **L1 has no TTL — in a class nothing wires.** `MultiLevelEmbeddingCache` L1 evicts by
-   capacity/hotness, not time, so a hot embedding that changed in place (same ID, new vector)
-   stays until evicted unless written through. Note this is a property of unreachable code:
-   the class has no production construction (§1), so the live equivalent of this edge is
-   `LocalEmbeddingCache`'s value map, which is also TTL-free. **Open** — either wire the
-   class or delete it; documenting a three-tier Redis-outage defense that no service has is
-   the worst of the three states.
+2. **The heap embedding cache has no TTL.** `LocalEmbeddingCache`'s value map evicts by size,
+   not time, so an embedding changed in place (same ID, new vector) by anything other than
+   `/setembedding` stays until evicted or the pod restarts. (This edge was first written against
+   `MultiLevelEmbeddingCache`'s L1 — a class no service constructed. It was **deleted
+   2026-10-07** rather than left documented as a Redis-outage defense that no service had.)
 3. **Serve-stale is an availability trade — and only on a warm cache.** Under a
    backing-store outage caches serve old data rather than error; that's deliberate (AP), but
    it means a Redis incident can silently extend staleness to the stale-window bound. With

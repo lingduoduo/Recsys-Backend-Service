@@ -383,9 +383,8 @@ rotation operations are documented in
 
 ### Caching / CDN offload
 
-Multi-tier embedding caches (`MultiLevelEmbeddingCache` L1 heap 10k → L2 Redis →
-L3; `LocalEmbeddingCache` 100k; `LogicalExpiryEmbeddingCache` soft-expiry to
-prevent TTL stampede) plus `RecommendationCache` (RW-lock TTL-LRU with in-flight
+Embedding caches in front of Redis (`LocalEmbeddingCache` heap 100k on 6010;
+`LogicalExpiryEmbeddingCache` soft-expiry on 7010 to prevent TTL stampede) plus `RecommendationCache` (RW-lock TTL-LRU with in-flight
 dedup) absorb load and offload the origin. CloudFront offloads the two shared
 catalog reads at the edge (`/api/catalog/item` s-maxage 3600, `/api/catalog/similar`
 s-maxage 300); personalized `/api/recommend` stays `no-store` (0% hit ratio, by

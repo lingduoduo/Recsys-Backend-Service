@@ -427,7 +427,6 @@
                 <include>**/redis/ShardedTopKStoreTest.java</include>
                 <include>**/redis/ShardedTopKStoreTtlConfigTest.java</include>
                 <include>**/cache/LogicalExpiryEmbeddingCacheTest.java</include>
-                <include>**/cache/MultiLevelEmbeddingCacheTest.java</include>
                 <include>**/sharding/SequenceGeneratorGenerationTest.java</include>
                 <include>**/sharding/ShardKeysTest.java</include>
                 <include>**/sharding/ShardTopologySnapshotFormatTest.java</include>

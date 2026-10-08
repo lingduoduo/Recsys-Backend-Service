@@ -540,8 +540,8 @@ object *has*, which service it has it in, and how it is invalidated.
 |---|---|---|---|---|---|
 | User embeddings (7010) | `u2vEmb:<id>` | `LogicalExpiryEmbeddingCache` | cache-aside + soft-TTL serve-stale + 1 bg refresh | soft **30 s** (`ONLINE_USER_EMB_SOFT_TTL_SECONDS`); values size-bounded only | write-through |
 | User embeddings (6010) | `u2vEmb:<id>` | `LocalEmbeddingCache` (+Bloom, null sentinel, single-flight) | cache-aside | none on values; sentinels 30 s | write-through |
-| Item embeddings — `/similar` | `i2vEmb:<id>` | `LocalEmbeddingCache` | cache-aside | none (seeded with TTL 0) | write-through via `/setembedding` |
-| Item embeddings — **recall** | — | `CandidateGenerator.embeddingIndex` (heap, LSH/exact) | **not cached — classpath-loaded at construction** | n/a | **never** (see below) |
+| Item embeddings — `/similar` | `i2vEmb:<id>` | `LocalEmbeddingCache` | cache-aside | none (seeded with TTL 0) | write-through via `/setembedding`; **periodic refresh from Redis (60 s)** |
+| Item embeddings — **recall** | `i2vEmb:<id>` (refresh only) | `CandidateGenerator.embeddingIndex` (heap, LSH/exact/SPANN) | classpath-built at construction, then **diff-refreshed from Redis** off the request path | n/a | `/setembedding` + **periodic refresh (60 s)** |
 | Popular items — trending | `topk:{window}:value` | `ShardedTopKStore` | cache-aside | 2 s fresh / 60 s stale | TTL only |
 | Popular items — global | `global:item_popularity` | `GlobalPopularityStore` → `TtlSingleFlightCache` | cache-aside, fail-open | 1 s fresh / 60 s stale | TTL only |
 | Recommendation lists | — | `RecommendationCache` — **8080 only** | cache-aside | 300 s; cold-start pools 3600 s | version keying (variant + model version) |
@@ -549,16 +549,42 @@ object *has*, which service it has it in, and how it is invalidated.
 
 Three rows deserve more than a table cell.
 
-**Item embeddings have two consumers and two truths.** The vector index is built in
-`CandidateGenerator`'s constructor from `DataLoader.loadMovieEmbeddings()` — the **classpath** —
-and nothing ever refreshes it from Redis. `warmUp()` populates the *cache*, not the index.
-So `ItemEmbeddingJob` writing `i2vEmb:*` is invisible to embedding recall until the pod
-restarts, while `/similar` — reading the same logical object through `LocalEmbeddingCache` —
-sees the new vector immediately. `POST /setembedding` is the only path that updates both, and it
-does so by calling two different objects
-([RecSysServer:175](../../src/main/java/com/recsys/api/serving/RecSysServer.java)). A batch
-embedding refresh is therefore a deploy-shaped operation, not a data-shaped one. The upside,
-such as it is: embedding recall is the one read that a Redis outage cannot affect.
+**Item embeddings have two consumers — and until 2026-10-07, two stale copies.** The vector index
+is built in `CandidateGenerator`'s constructor from `DataLoader.loadMovieEmbeddings()` — the
+**classpath** — and `/similar` reads through 6010's `LocalEmbeddingCache`, preloaded from the same
+classpath at boot. Earlier versions of this section claimed `/similar` "sees the new vector
+immediately"; it never did: a cache hit was returned forever (values have no TTL), and once the
+Bloom filter was populated an ID absent at boot was rejected before Redis was consulted. So a
+batch `i2vEmb` rewrite reached **neither** consumer until restart, and `POST /setembedding` was the
+only path that updated both.
+
+**Since 2026-10-07 both converge on Redis.** `ItemEmbeddingRefresher` (a `GuardedLoop`, every
+`ITEM_EMBEDDING_REFRESH_INTERVAL_MS`, default 60 s, `0` disables) runs on every serving pod —
+6010, 7010 and 8080. Each pass reads every catalog ID through a lenient chunked `MGET`, then pushes
+only vectors that differ from the last one it applied: into the recall index
+(`CandidateGenerator.updateEmbedding`) and, on 6010, into the `/similar` cache through a cache-only
+`LocalEmbeddingCache.refresh` that also admits the ID to the Bloom filter and never writes back.
+The diff is load-bearing — `SpannVectorIndex.addOrUpdate` appends a posting block per call. A
+corrupt value is skipped and counted (`recsys_item_embedding_refresh_skipped_total{reason}`) rather
+than failing the pass; a key absent from Redis keeps its current vector (eviction is not deletion).
+Redis stays off the request path: a failed pass changes nothing in memory, and the loop's
+`recsys_loop_seconds_since_success{loop="item-embedding-refresh"}` feeds the existing
+`RecsysLoopStale` alert. Measured on a running 6010 against real Redis, after rewriting `i2vEmb:9`
+to movie 1's vector and `i2vEmb:10` to user 123's (2 s interval):
+
+```
+main:   /similar?movieId=1 [4, 3, 2, 5, 6] → unchanged      recommend(123) unchanged
+branch: /similar?movieId=1 [4, 3, 2, 5, 6] → [9, 4, 10, …]  recommend(123) → [9, 10, 5, 6, …]
+        recsys_item_embedding_refresh_applied_total 2.0
+```
+
+One race is accepted: a pass that read `v1` just before `POST /setembedding` wrote `v2` re-applies
+`v1`; the next pass reads `v2` and repairs it, so it lasts one interval. The refresher diffs Redis
+against what *it* last applied, not against what memory holds, so two rarer interleavings leave a
+pod diverged until Redis changes again: on 6010, a request-time cache miss that loads `v1` and
+lands after a refresh put `v2` (the `/similar` cache has no TTL); and `/setembedding` with a TTL
+shorter than the interval, whose key expires before a pass sees it (absent means keep). Catalog membership
+is still deploy-shaped — `DataManager` loads it from the classpath and hits outside it are dropped.
 
 **Recommendation lists are cached on exactly one of the three serving services.** 8080 has
 `RecommendationCache` with version keying; 6010 and 7010 recompute every request. The same
@@ -664,11 +690,11 @@ variant. An empty Redis is a supported state. An *unreachable* one, on a cold JV
    write through Lua. Two residual gaps: detection is **probabilistic**, so a rarely-written
    key may take many ticks to surface; and the allow-list is itself a declaration that can
    go stale if a new durable namespace is added without updating it.
-9. **The item-embedding recall index is never invalidated.** It is built from the classpath in
-   `CandidateGenerator`'s constructor and no code path refreshes it from Redis, so a batch
-   `i2vEmb` rewrite reaches `/similar` immediately and embedding recall never (§10). **Open**
-   — a periodic index rebuild is the obvious fix and also the one that would make embedding
-   recall newly dependent on Redis availability, which today it is not.
+9. **The item-embedding recall index was never invalidated.** It was built from the classpath
+   and nothing refreshed it — and, contrary to what this edge used to say, neither was `/similar`.
+   **Resolved 2026-10-07** — `ItemEmbeddingRefresher` diff-applies Redis vectors to both every
+   60 s (§10, measured). The Redis dependency it adds is the *refresh's*, not recall's: a failed
+   pass leaves the in-memory index serving unchanged.
 10. **6010 could not boot with Redis down.** `seedEmbeddings` and `LocalEmbeddingCache.warmUp()`
    were eager Redis reads in `main`, so the process exited code 1 (§9, verified by running it),
    giving away the lazy-connect property `LettuceRedisExecutor` was designed to provide.

@@ -7,12 +7,14 @@ import io.lettuce.core.api.sync.RedisCommands;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.mock;
@@ -192,5 +194,29 @@ class RedisEmbeddingStoreTest {
         // budget broke the loop: at most the initial scan + one continuation
         verify(cmd, atMost(1)).scan(any(ScanArgs.class));
         verify(cmd, atMost(1)).scan(any(KeyScanCursor.class), any(ScanArgs.class));
+    }
+
+    @Test
+    void lenientBatchReadSkipsAndReportsCorruptValues() {
+        RedisCommands<String, String> cmd = mock(RedisCommands.class);
+        when(cmd.mget(any(String[].class))).thenReturn(kvs("1.0 2.0", "not-a-vector", null, "3.0 4.0"));
+        RedisEmbeddingStore store = new RedisEmbeddingStore(execFor(cmd), "i2vEmb");
+        List<Integer> corrupt = new ArrayList<>();
+
+        Map<Integer, float[]> got = store.getEmbeddingsLenient(List.of(1, 2, 3, 4), corrupt::add);
+
+        assertThat(got).containsOnlyKeys(1, 4);
+        assertThat(got.get(1)).containsExactly(1f, 2f);
+        assertThat(corrupt).containsExactly(2);
+    }
+
+    @Test
+    void strictBatchReadStillThrowsOnACorruptValue() {
+        RedisCommands<String, String> cmd = mock(RedisCommands.class);
+        when(cmd.mget(any(String[].class))).thenReturn(kvs("1.0 2.0", "not-a-vector"));
+        RedisEmbeddingStore store = new RedisEmbeddingStore(execFor(cmd), "i2vEmb");
+
+        assertThatThrownBy(() -> store.getEmbeddings(List.of(1, 2)))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

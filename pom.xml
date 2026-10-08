@@ -427,6 +427,14 @@
                 <include>**/redis/ShardedTopKStoreTest.java</include>
                 <include>**/redis/ShardedTopKStoreTtlConfigTest.java</include>
                 <include>**/cache/LogicalExpiryEmbeddingCacheTest.java</include>
+                <!-- Item-embedding refresh: diff-only apply (SPANN appends per update), corrupt-value
+                     isolation, missing-key retention, sink-failure retry, and the cache-only path that
+                     must never echo back to Redis. -->
+                <include>**/vectordb/ItemEmbeddingRefresherTest.java</include>
+                <!-- The refresh drives LSH (the default backend) for the pod's lifetime: an id must live in
+                     exactly one bucket, or bucket lists and every query's candidate set grow with uptime. -->
+                <include>**/vectordb/EmbeddingLSHTest.java</include>
+                <include>**/cache/LocalEmbeddingCacheTest.java</include>
                 <include>**/sharding/SequenceGeneratorGenerationTest.java</include>
                 <include>**/sharding/ShardKeysTest.java</include>
                 <include>**/sharding/ShardTopologySnapshotFormatTest.java</include>

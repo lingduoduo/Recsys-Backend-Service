@@ -173,6 +173,19 @@ public class LocalEmbeddingCache implements EmbeddingStore {
         return result;
     }
 
+    /**
+     * Cache-only update for a value just read from the backing store (the periodic item-embedding
+     * refresh). Unlike {@link #setEmbedding} it never writes back — that would echo to Redis the value
+     * just read from it. Adds the id to the Bloom filter so an item first written after startup is no
+     * longer rejected, and clears any null sentinel.
+     */
+    public void refresh(int id, float[] vector) {
+        if (vector == null) return;
+        bloom.add(id);
+        nullSentinels.invalidate(id);
+        put(id, vector);
+    }
+
     @Override
     public void setEmbedding(int id, float[] vector, long ttlSeconds) {
         backingStore.setEmbedding(id, vector, ttlSeconds);

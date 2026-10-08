@@ -16,6 +16,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class LocalEmbeddingCacheTest {
 
@@ -323,5 +331,51 @@ class LocalEmbeddingCacheTest {
 
         @Override
         public Set<Integer> scanIds(int maxKeys) { return data.keySet(); }
+    }
+
+    // --- refresh(): how a periodic Redis re-read reaches /similar ---
+
+    @Test
+    void anIdWrittenToTheStoreAfterPreloadIsInvisible_theDefectRefreshFixes() {
+        EmbeddingStore store = mock(EmbeddingStore.class);
+        when(store.getEmbedding(99)).thenReturn(new float[]{1f, 2f});
+        LocalEmbeddingCache c = new LocalEmbeddingCache(store);
+        c.preload(Map.of(1, new float[]{0f, 1f}));   // Bloom now knows only id 1
+
+        assertThat(c.getEmbedding(99)).as("Bloom rejects ids absent at preload").isNull();
+    }
+
+    @Test
+    void refreshMakesANewIdVisibleWithoutTouchingTheStore() {
+        EmbeddingStore store = mock(EmbeddingStore.class);
+        LocalEmbeddingCache c = new LocalEmbeddingCache(store);
+        c.preload(Map.of(1, new float[]{0f, 1f}));
+
+        c.refresh(99, new float[]{1f, 2f});
+
+        assertThat(c.getEmbedding(99)).containsExactly(1f, 2f);
+        verify(store, never()).setEmbedding(anyInt(), any(), anyLong());
+        verify(store, never()).setEmbeddings(anyMap(), anyLong());
+    }
+
+    @Test
+    void refreshReplacesAChangedVector() {
+        LocalEmbeddingCache c = new LocalEmbeddingCache(mock(EmbeddingStore.class));
+        c.preload(Map.of(1, new float[]{0f, 1f}));
+
+        c.refresh(1, new float[]{5f, 5f});
+
+        assertThat(c.getEmbedding(1)).containsExactly(5f, 5f);
+    }
+
+    @Test
+    void refreshClearsANullSentinel() {
+        EmbeddingStore store = mock(EmbeddingStore.class);   // returns null: id 7 is "known absent"
+        LocalEmbeddingCache c = new LocalEmbeddingCache(store);
+        assertThat(c.getEmbedding(7)).isNull();              // caches a null sentinel
+
+        c.refresh(7, new float[]{1f, 1f});
+
+        assertThat(c.getEmbedding(7)).containsExactly(1f, 1f);
     }
 }

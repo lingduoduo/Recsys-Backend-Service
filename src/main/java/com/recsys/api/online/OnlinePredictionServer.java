@@ -1,5 +1,6 @@
 package com.recsys.api.online;
 
+import com.recsys.infrastructure.vectordb.ItemEmbeddingRefresher;
 import ch.qos.logback.classic.LoggerContext;
 import com.recsys.application.online.OnlineServices;
 import com.recsys.application.online.OnlineBlendingPipeline;
@@ -149,6 +150,11 @@ public final class OnlinePredictionServer {
             // Any of these running first triggers a "MeterFilter configured after a Meter
             // registered" WARN on every startup.
             RequestDurationHistogram.configure(registry);
+            // Keeps the recall index tracking batch rewrites of i2vEmb in Redis (02_Caching §10).
+            ItemEmbeddingRefresher itemRefresher = ItemEmbeddingRefresher.forGenerator(
+                    candidateGenerator, dataManager::getAllMovieIds,
+                    new RedisEmbeddingStore(jedisPool, "i2vEmb"), List.of(), registry);
+            itemRefresher.start(ItemEmbeddingRefresher.intervalFromEnv(System::getenv));
             // Registered on the serving registry so degraded recalls reach /metrics; without it the recall
             // service built a private instance nothing read.
             RecallDegradationMetrics recallMetrics = createRecallMetrics(registry);
@@ -308,6 +314,7 @@ public final class OnlinePredictionServer {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 loadShedder.markShuttingDown();   // flip readiness to 503 + shed new load before draining
                 server.stop().join();
+                itemRefresher.close();
                 try {
                     candidateGenerator.close();
                 } catch (RuntimeException e) {

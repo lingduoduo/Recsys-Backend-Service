@@ -1,5 +1,6 @@
 package com.recsys.api.serving;
 
+import com.recsys.infrastructure.vectordb.ItemEmbeddingRefresher;
 import ch.qos.logback.classic.LoggerContext;
 import com.linecorp.armeria.common.HttpMethod;
 import com.linecorp.armeria.common.HttpResponse;
@@ -126,6 +127,12 @@ public class RecSysServer {
             // Any of these running first triggers a "MeterFilter configured after a Meter
             // registered" WARN on every startup.
             RequestDurationHistogram.configure(registry);
+            // Keeps the recall index and the /similar cache tracking batch rewrites of i2vEmb in Redis
+            // (02_Caching §10). Off the request path; a failed pass changes nothing in memory.
+            ItemEmbeddingRefresher itemRefresher = ItemEmbeddingRefresher.forGenerator(
+                    candidateGenerator, dataManager::getAllMovieIds, embStore,
+                    List.of(embCache::refresh), registry);
+            itemRefresher.start(ItemEmbeddingRefresher.intervalFromEnv(System::getenv));
             // The Splunk appender was built by Logback long before this registry existed, so it
             // cannot register itself. No-op when SPLUNK_HEC_TOKEN is unset.
             SplunkHecMetrics.register(registry);
@@ -234,6 +241,7 @@ public class RecSysServer {
                 loadShedder.markShuttingDown();   // readiness -> 503 so LBs drain this pod first
                 server.stop().join();
                 GracefulExecutors.shutdownGracefully(executor);
+                itemRefresher.close();
                 try {
                     candidateGenerator.close();
                 } catch (RuntimeException e) {

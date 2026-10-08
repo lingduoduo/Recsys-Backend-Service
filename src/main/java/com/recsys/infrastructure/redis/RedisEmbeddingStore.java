@@ -27,6 +27,8 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
+import java.util.Objects;
+import java.util.function.IntConsumer;
 
 public class RedisEmbeddingStore implements EmbeddingStore {
     private static final Logger log = LoggerFactory.getLogger(RedisEmbeddingStore.class);
@@ -168,14 +170,23 @@ public class RedisEmbeddingStore implements EmbeddingStore {
 
     @Override
     public Map<Integer, float[]> getEmbeddings(Collection<Integer> movieIds) {
+        return readBatched(movieIds, null);
+    }
+
+    /**
+     * Like {@link #getEmbeddings} but a value that does not parse is skipped and its id handed to
+     * {@code onCorrupt}, instead of aborting the whole read. For the periodic item-embedding refresh:
+     * with the strict read, one corrupt key would fail every pass forever.
+     */
+    public Map<Integer, float[]> getEmbeddingsLenient(Collection<Integer> ids, IntConsumer onCorrupt) {
+        return readBatched(ids, Objects.requireNonNull(onCorrupt, "onCorrupt"));
+    }
+
+    private Map<Integer, float[]> readBatched(Collection<Integer> movieIds, IntConsumer onCorrupt) {
         Map<Integer, float[]> embeddings = new HashMap<>();
         if (movieIds == null || movieIds.isEmpty()) return embeddings;
 
         List<Integer> ids = new ArrayList<>(new LinkedHashSet<>(movieIds));
-        if (ids.isEmpty()) {
-            return embeddings;
-        }
-
         for (int start = 0; start < ids.size(); start += mgetBatchSize) {
             int end = Math.min(ids.size(), start + mgetBatchSize);
             String[] keys = new String[end - start];
@@ -187,10 +198,15 @@ public class RedisEmbeddingStore implements EmbeddingStore {
             for (int j = 0; j < values.size(); j++) {
                 String value = values.get(j).getValueOrElse(null);
                 if (value == null || value.isBlank()) continue;
-                embeddings.put(ids.get(batchStart + j), VectorMath.parseVector(value));
+                int id = ids.get(batchStart + j);
+                try {
+                    embeddings.put(id, VectorMath.parseVector(value));
+                } catch (IllegalArgumentException e) {   // NumberFormatException included
+                    if (onCorrupt == null) throw e;
+                    onCorrupt.accept(id);
+                }
             }
         }
-
         return embeddings;
     }
 
